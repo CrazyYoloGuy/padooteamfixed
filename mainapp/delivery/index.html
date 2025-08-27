@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Padoo Delivery - Driver Dashboard</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Driver dashboard for delivery management system">
+    <meta name="theme-color" content="#10b981">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Driver App">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Driver App">
+    
+    <!-- Mobile App Switcher -->
+    <meta name="format-detection" content="telephone=no">
+    <meta name="msapplication-TileColor" content="#10b981">
+    <meta name="msapplication-TileImage" content="/plogo.png">
+    <meta name="msapplication-tap-highlight" content="no">
+    <meta name="apple-touch-fullscreen" content="yes">
+    <meta name="apple-mobile-web-app-oriented" content="portrait">
+    
+    <!-- Prevent browser branding in app switcher -->
+    <meta name="mobile-web-app-title" content="Driver App">
+    <meta name="apple-mobile-web-app-title" content="Driver App">
+    <meta name="msapplication-tooltip" content="Delivery Driver Dashboard">
+    <meta name="msapplication-starturl" content="/app">
+    <meta name="msapplication-navbutton-color" content="#10b981">
+    <meta name="msapplication-window" content="width=1024;height=768">
+    
+    <!-- Android Chrome -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#10b981">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#059669">
+    
+    <!-- Force standalone mode -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="msapplication-navbutton-color" content="#10b981">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Icons -->
+    <link rel="icon" href="/plogo.png">
+    <link rel="apple-touch-icon" href="/plogo.png">
+    
+    <!-- Standalone Mode Styles -->
+    <link rel="stylesheet" href="/standalone-mode.css">
+    
+    <!-- CSS Files -->
+    <link rel="stylesheet" href="/mainapp/delivery/css/styles.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/home.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/orders.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/settings.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/profile.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/modals.css">
+    <link rel="stylesheet" href="/mainapp/delivery/css/notifications.css">
+    
+    <!-- External CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="driver-app">
+    <div id="app">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="header-logo">
+                <img src="/plogo.png" alt="Padoo Delivery">
+            </div>
+            <h1 class="app-title">Padoo Delivery</h1>
+        </header>
+        
+        <!-- Home Page -->
+        <div id="home-page" class="page active">
+            <div class="page-header">
+                <div class="header-content">
+                    <h2 data-translate="driverDashboard">Driver Dashboard</h2>
+                    <div class="header-date">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span id="current-date"></span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Stats -->
+            <div class="quick-stats">
+                <div class="stat-card earnings">
+                    <div class="stat-icon">
+                        <i class="fas fa-dollar-sign"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="total-earnings">$0.00</h3>
+                        <p data-translate="totalEarnings">Total Earnings</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card orders">
+                    <div class="stat-icon">
+                        <i class="fas fa-box"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="total-orders">0</h3>
+                        <p data-translate="totalOrders">Total Orders</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card today">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="today-orders">0</h3>
+                        <p data-translate="todaysOrders">Today's Orders</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card shops">
+                    <div class="stat-icon">
+                        <i class="fas fa-store"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="total-shops">0</h3>
+                        <p>Partner Shops</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <h3 class="section-title">
+                    <i class="fas fa-zap"></i>
+                    <span data-translate="quickActions">Quick Actions</span>
+                </h3>
+                <div class="action-cards">
+                    <div class="action-card" data-action="add-order">
+                        <div class="action-icon">
+                            <i class="fas fa-plus"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4 data-translate="addNewOrder">Add New Order</h4>
+                            <p data-translate="recordDelivery">Record a new delivery order</p>
+                        </div>
+                    </div>
+                    
+                    <div class="action-card" data-action="manage-shops">
+                        <div class="action-icon">
+                            <i class="fas fa-store"></i>
+                        </div>
+                        <div class="action-content">
+                            <h4 data-translate="managePartnerShops">Manage Shops</h4>
+                            <p data-translate="addEditShops">Add or edit partner shops</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Activity -->
+            <div class="recent-activity-section">
+                <h3 class="section-title">
+                    <i class="fas fa-history"></i>
+                    <span data-translate="recentActivity">Recent Activity</span>
+                </h3>
+                <div id="recent-activity"></div>
+            </div>
+        </div>
+
+        <!-- Orders Page -->
+        <div id="orders-page" class="page">
+            <div class="page-header">
+                <h2 data-translate="allOrders">My Orders</h2>
+                <div class="orders-filters">
+                    <button class="filter-btn active" data-filter="all" data-translate="all">All</button>
+                    <button class="filter-btn" data-filter="today" data-translate="today">Today</button>
+                    <button class="filter-btn" data-filter="week" data-translate="week">This Week</button>
+                    <button class="filter-btn" data-filter="month" data-translate="month">This Month</button>
+                </div>
+            </div>
+            
+            <div id="orders-container"></div>
+        </div>
+
+        <!-- Notifications Page -->
+        <div id="notifications-page" class="page">
+            
+            <div class="notifications-container">
+                <div id="notifications-list" class="notifications-list">
+                    <div class="loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <span data-translate="loading">Loading notifications...</span>
+                    </div>
+                </div>
+                
+                <div id="no-notifications" class="no-data-message" style="display: none;">
+                    <i class="fas fa-bell-slash"></i>
+                    <h3 data-translate="noNotifications">No Notifications</h3>
+                    <p data-translate="notificationsWillAppear">You don't have any notifications yet.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Page -->
+        <div id="recent-page" class="page">
+            <div class="page-header">
+                <h2 data-translate="Last 20 Orders">Recent Orders</h2>
+            </div>
+
+            <div class="recent-container">
+                <div id="recent-orders-content">
+                    <!-- Recent orders will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile Page -->
+        <div id="profile-page" class="page">
+            <div class="profile-container">
+                <!-- Profile content will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+            <button class="nav-item active" data-page="home">
+                <i class="fas fa-home"></i>
+                <span data-translate="home">Home</span>
+            </button>
+            <button class="nav-item" data-page="notifications">
+                <i class="fas fa-shopping-bag"></i>
+                <span data-translate="orders">Orders</span>
+                <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
+            </button>
+            <button class="nav-item" data-page="orders">
+                <i class="fas fa-history"></i>
+                <span data-translate="history">History</span>
+            </button>
+            <button class="nav-item" data-page="recent">
+                <i class="fas fa-clock"></i>
+                <span data-translate="recent">Recent</span>
+            </button>
+            <button class="nav-item" data-page="profile">
+                <i class="fas fa-user"></i>
+                <span data-translate="profile">Profile</span>
+            </button>
+        </div>
+
+
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <!-- Order Details Modal -->
+    <div id="order-details-modal" onclick="deliveryApp.closeOrderDetailsModal()" style="
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 99999;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    ">
+        <div onclick="event.stopPropagation()" style="
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        ">
+            <div style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 20px;
+                border-bottom: 1px solid #e5e7eb;
+                background: #f8fafc;
+            ">
+                <h3 id="order-details-title" style="margin: 0; color: #111827; font-size: 18px; font-weight: 700;">Order Details</h3>
+                <button onclick="deliveryApp.closeOrderDetailsModal()" style="
+                    background: none;
+                    border: none;
+                    font-size: 18px;
+                    color: #6b7280;
+                    cursor: pointer;
+                    padding: 4px;
+                    border-radius: 4px;
+                    transition: all 0.2s ease;
+                " onmouseover="this.style.background='#e5e7eb'; this.style.color='#111827'" onmouseout="this.style.background='none'; this.style.color='#6b7280'">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="order-details-content">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Translation System -->
+    <script src="/mainapp/delivery/js/translations.js"></script>
+    <script src="/mainapp/delivery/js/app.js"></script>
+    
+    <!-- Standalone Mode Enforcer -->
+    <script src="/standalone-enforcer.js"></script>
+    <script src="/standalone-detector.js"></script>
+    
+    <!-- PWA Script -->
+    <script src="/pwa-utils.js"></script>
+</body>
+</html> 
