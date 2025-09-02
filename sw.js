@@ -192,12 +192,12 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-// Handle push notifications
+// Handle push notifications with enhanced sound and reliability
 self.addEventListener('push', (event) => {
   console.log('[SW] Push notification received');
-  
+
   let notificationData = {};
-  
+
   if (event.data) {
     try {
       notificationData = event.data.json();
@@ -205,90 +205,377 @@ self.addEventListener('push', (event) => {
       notificationData = { body: event.data.text() };
     }
   }
-  
+
+  // Enhanced notification options for maximum reliability
   const options = {
-    body: notificationData.body || 'New notification from Padoo Delivery',
+    body: notificationData.body || 'New delivery order available!',
     icon: '/icons/icon-192x192.png',
     badge: '/icons/plogo.png',
     image: notificationData.image || null,
-    tag: notificationData.tag || 'padoo-notification',
+    tag: 'padoo-order-' + (notificationData.notificationId || Date.now()),
     renotify: true,
     requireInteraction: true,
-    silent: false,
-    vibrate: [200, 100, 200, 100, 200],
+    silent: false, // Ensure sound is enabled
+    vibrate: [300, 200, 300, 200, 300, 200, 300], // Strong vibration pattern
+    timestamp: Date.now(),
     data: {
-      url: notificationData.url || '/app',
+      url: notificationData.url || '/mainapp/delivery',
       notificationId: notificationData.notificationId || null,
       clickAction: notificationData.clickAction || 'open_app',
+      orderAmount: notificationData.order_amount || null,
+      shopName: notificationData.shop_name || null,
+      orderId: notificationData.order_id || null,
       ...notificationData.data
     },
     actions: [
       {
-        action: 'open',
-        title: '📱 Open App',
-        icon: '/icons/plogo.png'
+        action: 'accept',
+        title: '✅ Accept Order',
+        icon: '/icons/icon-192x192.png'
       },
       {
-        action: 'close',
+        action: 'view',
+        title: '👀 View Details',
+        icon: '/icons/icon-192x192.png'
+      },
+      {
+        action: 'dismiss',
         title: '❌ Dismiss',
-        icon: '/icons/plogo.png'
+        icon: '/icons/icon-192x192.png'
       }
     ]
   };
 
+  // Show notification with enhanced error handling
   event.waitUntil(
-    self.registration.showNotification(notificationData.title || 'Padoo Delivery', options)
-      .then(() => {
-        console.log('[SW] Push notification displayed successfully');
-      })
-      .catch(error => {
-        console.error('[SW] Error displaying push notification:', error);
-      })
+    Promise.all([
+      // Show the notification
+      self.registration.showNotification(
+        notificationData.title || '🚚 New Delivery Order!',
+        options
+      ),
+      // Play custom sound if available
+      playNotificationSound(notificationData),
+      // Store notification for offline handling
+      storeNotificationOffline(notificationData)
+    ]).then(() => {
+      console.log('[SW] Enhanced push notification displayed successfully');
+
+      // Send analytics/tracking if needed
+      if (notificationData.notificationId) {
+        trackNotificationDelivery(notificationData.notificationId);
+      }
+    }).catch(error => {
+      console.error('[SW] Error displaying enhanced push notification:', error);
+
+      // Fallback: try basic notification
+      return self.registration.showNotification(
+        'New Order Available!',
+        {
+          body: 'Tap to view your new delivery order',
+          icon: '/icons/icon-192x192.png',
+          requireInteraction: true,
+          vibrate: [300, 200, 300]
+        }
+      );
+    })
   );
 });
 
-// Handle notification clicks
+// Enhanced sound notification function
+async function playNotificationSound(notificationData) {
+  try {
+    // For order notifications, we want maximum attention
+    if (notificationData.title && notificationData.title.includes('Order')) {
+      console.log('[SW] Playing enhanced order notification sound');
+
+      // Multiple notification attempts for reliability
+      const soundPromises = [];
+
+      // Method 1: Try to wake up the main app to play sound
+      const clients = await self.clients.matchAll({ includeUncontrolled: true });
+      clients.forEach(client => {
+        soundPromises.push(
+          client.postMessage({
+            type: 'play_notification_sound',
+            strong: true,
+            notificationData: notificationData
+          })
+        );
+      });
+
+      // Method 2: Use Web Audio API in service worker (if supported)
+      if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {
+        soundPromises.push(playServiceWorkerSound());
+      }
+
+      await Promise.allSettled(soundPromises);
+    }
+  } catch (error) {
+    console.error('[SW] Error playing notification sound:', error);
+  }
+}
+
+// Service worker sound generation
+async function playServiceWorkerSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    // Create urgent delivery notification sound (multiple tones)
+    const frequencies = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+
+    frequencies.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + i * 0.2);
+
+      gain.gain.setValueAtTime(0.4, now + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3 + i * 0.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + i * 0.2);
+      osc.stop(now + 0.3 + i * 0.2);
+    });
+
+    // Close context after sound completes
+    setTimeout(() => {
+      ctx.close();
+    }, 1500);
+
+  } catch (error) {
+    console.error('[SW] Error creating service worker sound:', error);
+  }
+}
+
+// Store notification for offline handling
+async function storeNotificationOffline(notificationData) {
+  try {
+    // Store in IndexedDB for offline access
+    const dbName = 'PadooNotifications';
+    const storeName = 'notifications';
+
+    const request = indexedDB.open(dbName, 1);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        const store = db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: true });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
+        store.createIndex('notificationId', 'notificationId', { unique: false });
+      }
+    };
+
+    request.onsuccess = (event) => {
+      const db = event.target.result;
+      const transaction = db.transaction([storeName], 'readwrite');
+      const store = transaction.objectStore(storeName);
+
+      store.add({
+        ...notificationData,
+        timestamp: Date.now(),
+        received_at: new Date().toISOString()
+      });
+    };
+
+  } catch (error) {
+    console.error('[SW] Error storing notification offline:', error);
+  }
+}
+
+// Track notification delivery for analytics
+async function trackNotificationDelivery(notificationId) {
+  try {
+    await fetch('/api/notifications/delivered', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        notificationId: notificationId,
+        deliveredAt: new Date().toISOString(),
+        userAgent: navigator.userAgent
+      })
+    });
+  } catch (error) {
+    console.error('[SW] Error tracking notification delivery:', error);
+  }
+}
+
+// Enhanced notification click handling
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification click received:', event.action);
-  
+  console.log('[SW] Notification click received:', event.action, event.notification.data);
+
   event.notification.close();
-  
-  if (event.action === 'close') {
-    // Just close the notification
+
+  const notificationData = event.notification.data || {};
+  const notificationId = notificationData.notificationId;
+  const orderId = notificationData.orderId;
+  const shopName = notificationData.shopName;
+
+  // Handle different actions
+  if (event.action === 'dismiss') {
     console.log('[SW] Notification dismissed by user');
+    // Track dismissal
+    if (notificationId) {
+      trackNotificationAction(notificationId, 'dismissed');
+    }
     return;
   }
-  
-  // Handle open action or notification click
-  const urlToOpen = event.notification.data?.url || '/app';
-  const notificationId = event.notification.data?.notificationId;
-  
+
+  if (event.action === 'accept') {
+    console.log('[SW] Order accepted via notification');
+    // Handle order acceptance
+    event.waitUntil(handleOrderAcceptance(notificationData));
+    return;
+  }
+
+  // Handle view action or general notification click
+  const urlToOpen = notificationData.url || '/mainapp/delivery';
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(clientList => {
         // Check if app is already open
         for (const client of clientList) {
           if (client.url.includes('/app') || client.url.includes('/mainapp')) {
+            console.log('[SW] Focusing existing app window');
             client.focus();
-            // Send message to mark notification as read if we have an ID
+
+            // Send comprehensive message to app
+            client.postMessage({
+              type: 'notification_clicked',
+              action: event.action || 'view',
+              notificationId: notificationId,
+              orderId: orderId,
+              shopName: shopName,
+              notificationData: notificationData
+            });
+
+            // Track the click
             if (notificationId) {
-              client.postMessage({
-                type: 'notification_clicked',
-                notificationId: notificationId
-              });
+              trackNotificationAction(notificationId, event.action || 'clicked');
             }
+
             return;
           }
         }
-        
-        // App not open, open new window
-        return clients.openWindow(urlToOpen);
+
+        // App not open, open new window with specific parameters
+        let finalUrl = urlToOpen;
+        if (notificationId) {
+          finalUrl += `?notification=${notificationId}`;
+        }
+        if (orderId) {
+          finalUrl += `${finalUrl.includes('?') ? '&' : '?'}order=${orderId}`;
+        }
+
+        console.log('[SW] Opening new app window:', finalUrl);
+        return clients.openWindow(finalUrl);
+      })
+      .then(() => {
+        // Track the click after handling
+        if (notificationId) {
+          trackNotificationAction(notificationId, event.action || 'clicked');
+        }
       })
       .catch(error => {
         console.error('[SW] Error handling notification click:', error);
       })
   );
 });
+
+// Handle order acceptance directly from notification
+async function handleOrderAcceptance(notificationData) {
+  try {
+    const { orderId, notificationId } = notificationData;
+
+    if (!orderId) {
+      console.error('[SW] No order ID provided for acceptance');
+      return;
+    }
+
+    console.log('[SW] Attempting to accept order:', orderId);
+
+    // Try to accept the order via API
+    const response = await fetch('/api/orders/accept', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        orderId: orderId,
+        notificationId: notificationId,
+        acceptedVia: 'notification'
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log('[SW] Order accepted successfully:', result);
+
+      // Show success notification
+      await self.registration.showNotification('Order Accepted! 🎉', {
+        body: `You've accepted the order from ${notificationData.shopName || 'the shop'}`,
+        icon: '/icons/icon-192x192.png',
+        tag: 'order-accepted',
+        requireInteraction: false,
+        vibrate: [100, 50, 100]
+      });
+
+      // Notify any open app windows
+      const clients = await self.clients.matchAll({ includeUncontrolled: true });
+      clients.forEach(client => {
+        client.postMessage({
+          type: 'order_accepted',
+          orderId: orderId,
+          notificationId: notificationId
+        });
+      });
+
+    } else {
+      throw new Error('Failed to accept order');
+    }
+
+  } catch (error) {
+    console.error('[SW] Error accepting order:', error);
+
+    // Show error notification
+    await self.registration.showNotification('Order Acceptance Failed', {
+      body: 'Please open the app to accept this order manually',
+      icon: '/icons/icon-192x192.png',
+      tag: 'order-accept-failed',
+      requireInteraction: true
+    });
+  }
+}
+
+// Track notification actions for analytics
+async function trackNotificationAction(notificationId, action) {
+  try {
+    await fetch('/api/notifications/action', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        notificationId: notificationId,
+        action: action,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent
+      })
+    });
+  } catch (error) {
+    console.error('[SW] Error tracking notification action:', error);
+  }
+}
 
 // Handle push subscription change
 self.addEventListener('pushsubscriptionchange', (event) => {

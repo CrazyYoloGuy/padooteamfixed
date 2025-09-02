@@ -5311,7 +5311,7 @@ class ShopApp {
                 <div style="font-size: 11px; color: #6b7280; margin-bottom: 2px; text-transform: uppercase; font-weight: 600;">Assigned Driver</div>
                 <div style="font-size: 13px; font-weight: 600; color: #1e40af;">
                     <i class="fas fa-user" style="margin-right: 6px; font-size: 11px;"></i>
-                    ${order.users.email}
+                    ${order.users.name || order.users.email || 'Driver'}
                 </div>
             </div>
         ` : '';
@@ -5480,7 +5480,7 @@ class ShopApp {
                             ">
                                 ${(order.users && order.users.email) ? `
                                     <i class="fas fa-user" style="color: ${statusColor}; font-size: 12px;"></i>
-                                    ${order.users.email}
+                                    ${order.users.name || order.users.email || 'Driver'}
                                 ` : order.driver_id ? `
                                     <i class="fas fa-user" style="color: ${statusColor}; font-size: 12px;"></i>
                                     Driver #${order.driver_id}
@@ -5676,7 +5676,7 @@ class ShopApp {
                                 ">
                                     <div style="font-weight: 600; color: #1e40af; font-size: 14px;">
                                         <i class="fas fa-user" style="margin-right: 6px; font-size: 12px;"></i>
-                                        ${order.users.email}
+                                        ${order.users.name || order.users.email || 'Driver'}
                                     </div>
                                 </div>
                             </div>
@@ -5920,7 +5920,7 @@ class ShopApp {
                                 ">
                                     <div style="font-weight: 600; color: #1e40af; font-size: 14px;">
                                         <i class="fas fa-user" style="margin-right: 6px; font-size: 12px;"></i>
-                                        ${order.users.email}
+                                        ${order.users.name || order.users.email || 'Driver'}
                                     </div>
                                 </div>
                             </div>

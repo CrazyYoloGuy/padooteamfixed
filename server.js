@@ -2640,15 +2640,24 @@ app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res)
                 .from('users')
                 .select('id, email, name')
                 .in('id', driverIds);
-            (drivers || []).forEach(d => driversMap.set(d.id, d.name || d.email));
+            (drivers || []).forEach(d => {
+                driversMap.set(d.id, {
+                    name: d.name || 'Driver',
+                    email: d.email
+                });
+            });
         }
 
         // Format with driver info
-        const formattedOrders = (data || []).map(order => ({
-            ...order,
-            driver_email: driversMap.get(order.driver_id) || `Driver #${order.driver_id?.slice?.(0, 6)}`,
-            shop_name: 'Current Shop' // Shop already knows its own name
-        }));
+        const formattedOrders = (data || []).map(order => {
+            const driverInfo = driversMap.get(order.driver_id);
+            return {
+                ...order,
+                driver_name: driverInfo?.name || 'Driver',
+                driver_email: driverInfo?.email || 'Unknown',
+                shop_name: 'Current Shop' // Shop already knows its own name
+            };
+        });
 
         // Cache the results server-side
         shopCompletedOrdersCache.set(cacheKey, { time: now, data: formattedOrders });
@@ -4839,7 +4848,7 @@ app.delete('/api/admin/categories/:id', async (req, res) => {
 // ============== PUSH NOTIFICATION ENDPOINTS ==============
 
 // POST /api/push/subscription - Save push subscription
-app.post('/api/push/subscription', async (req, res) => {
+app.post('/api/push/subscription', authenticateUser, async (req, res) => {
     try {
         const { subscription, userId, userType } = req.body;
 
@@ -4863,16 +4872,22 @@ app.post('/api/push/subscription', async (req, res) => {
                 auth_key: subscription.keys.auth,
                 updated_at: new Date().toISOString()
             }, {
-                onConflict: 'user_id,user_type'
+                onConflict: 'endpoint'
             })
-            .select('*')
-            .single();
+            .select('*');
 
         if (error) {
-            console.error('Error saving push subscription:', error);
+            console.error('❌ Error saving push subscription:', error);
+            console.error('❌ Error details:', {
+                message: error.message,
+                code: error.code,
+                details: error.details,
+                hint: error.hint
+            });
             return res.status(500).json({
                 success: false,
-                message: 'Failed to save subscription'
+                message: 'Failed to save subscription',
+                error: error.message
             });
         }
 
@@ -4971,14 +4986,22 @@ async function sendPushNotification(userId, userType, notificationData) {
                 };
 
                 const payload = JSON.stringify({
-                    title: notificationData.title || 'Padoo Delivery',
-                    body: notificationData.message || 'You have a new notification',
+                    title: notificationData.title || '🚚 New Delivery Order!',
+                    body: notificationData.message || 'You have a new delivery order available',
                     icon: '/icons/icon-192x192.png',
                     badge: '/icons/plogo.png',
-                    tag: 'padoo-notification',
-                    url: '/app',
+                    tag: 'padoo-order-' + (notificationData.id || Date.now()),
+                    url: '/mainapp/delivery',
                     notificationId: notificationData.id,
-                    data: notificationData
+                    order_amount: notificationData.order_amount,
+                    shop_name: notificationData.shop_name,
+                    order_id: notificationData.order_id,
+                    data: {
+                        ...notificationData,
+                        timestamp: Date.now(),
+                        priority: 'high',
+                        category: 'order'
+                    }
                 });
 
                 await webpush.sendNotification(pushSubscription, payload);
@@ -5004,6 +5027,130 @@ async function sendPushNotification(userId, userType, notificationData) {
         console.error('Error in sendPushNotification:', error);
     }
 }
+
+// POST /api/orders/accept - Accept order from notification
+app.post('/api/orders/accept', authenticateUser, async (req, res) => {
+    try {
+        const { orderId, acceptedVia, notificationId } = req.body;
+        const driverId = req.userId;
+
+        if (!orderId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Order ID is required'
+            });
+        }
+
+        console.log(`📦 Driver ${driverId} accepting order ${orderId} via ${acceptedVia}`);
+
+        // Update order status to assigned
+        const { data: orderData, error: orderError } = await supabase
+            .from('shop_orders')
+            .update({
+                driver_id: driverId,
+                status: 'assigned',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', orderId)
+            .eq('status', 'pending') // Only accept pending orders
+            .select('*')
+            .single();
+
+        if (orderError || !orderData) {
+            console.error('Error accepting order:', orderError);
+            return res.status(400).json({
+                success: false,
+                message: 'Order not found or already assigned'
+            });
+        }
+
+        // Mark related notification as read if provided
+        if (notificationId) {
+            await supabase
+                .from('driver_notifications')
+                .update({
+                    is_read: true,
+                    status: 'confirmed',
+                    confirmed_at: new Date().toISOString()
+                })
+                .eq('id', notificationId)
+                .eq('driver_id', driverId);
+        }
+
+        // Broadcast order update to shop
+        const shopNotification = {
+            type: 'order_accepted',
+            orderId: orderId,
+            driverId: driverId,
+            acceptedAt: new Date().toISOString(),
+            acceptedVia: acceptedVia
+        };
+
+        broadcastToUser(orderData.shop_account_id, 'shop', shopNotification);
+
+        res.json({
+            success: true,
+            message: 'Order accepted successfully',
+            order: orderData
+        });
+
+    } catch (error) {
+        console.error('Error accepting order:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to accept order',
+            error: error.message
+        });
+    }
+});
+
+// POST /api/notifications/delivered - Track notification delivery
+app.post('/api/notifications/delivered', async (req, res) => {
+    try {
+        const { notificationId, deliveredAt, userAgent } = req.body;
+
+        console.log(`📊 Tracking notification delivery: ${notificationId}`);
+
+        // Log delivery for analytics (you could store this in a separate table)
+        console.log(`Notification ${notificationId} delivered at ${deliveredAt} via ${userAgent}`);
+
+        res.json({
+            success: true,
+            message: 'Delivery tracked'
+        });
+
+    } catch (error) {
+        console.error('Error tracking notification delivery:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to track delivery'
+        });
+    }
+});
+
+// POST /api/notifications/action - Track notification actions
+app.post('/api/notifications/action', async (req, res) => {
+    try {
+        const { notificationId, action, timestamp, userAgent } = req.body;
+
+        console.log(`📊 Tracking notification action: ${notificationId} - ${action}`);
+
+        // Log action for analytics
+        console.log(`Notification ${notificationId} action: ${action} at ${timestamp} via ${userAgent}`);
+
+        res.json({
+            success: true,
+            message: 'Action tracked'
+        });
+
+    } catch (error) {
+        console.error('Error tracking notification action:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to track action'
+        });
+    }
+});
 
 // --- PATCH/PUT/DELETE endpoints for orders ---
 // After successful order update by shop, call broadcastOrderUpdateToDrivers(shopId, 'edit', order)

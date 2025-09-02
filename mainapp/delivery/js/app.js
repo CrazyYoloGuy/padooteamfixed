@@ -327,8 +327,8 @@ class DeliveryApp {
         await this.loadSettingsData();
         await this.loadCategories();
 
-        // Setup push notifications
-        await this.setupPushNotifications();
+        // Setup push notifications (temporarily disabled for debugging)
+        // await this.setupPushNotifications();
 
         // Navigate to home page
         this.navigateToPage('home');
@@ -5839,9 +5839,9 @@ class DeliveryApp {
         }, 100);
     }
 
-    // Accept an order (alias for confirmNotification with better UX)
+    // Accept an order from notification
     async acceptOrder(notificationId, btnEl = null) {
-        console.log('🚀 ACCEPT ORDER CLICKED! ID:', notificationId);
+        console.log('🚀 ACCEPT ORDER CLICKED! Notification ID:', notificationId);
 
         // Keep a stable reference to the button (from inline onclick: this)
         const button = btnEl || null;
@@ -5856,19 +5856,60 @@ class DeliveryApp {
                 button.disabled = true;
             }
 
-            console.log('📞 Calling confirmNotification for:', notificationId);
+            // Find the notification to get the order ID
+            const notification = this.notifications.find(n => n.id === notificationId);
+            if (!notification) {
+                console.error('❌ Notification not found in memory. Available notifications:', this.notifications.map(n => n.id));
+                throw new Error('Notification not found');
+            }
 
-            // Call the existing confirm notification function
-            await this.confirmNotification(notificationId);
+            console.log('📦 Found notification:', notification);
+
+            // Extract order ID from notification
+            let orderId = null;
+            if (notification.order_id) {
+                orderId = notification.order_id;
+                console.log('✅ Found order_id in notification:', orderId);
+            } else {
+                console.error('❌ No order_id in notification. Notification data:', notification);
+                throw new Error('Order ID not found in notification. This notification may not be an order notification.');
+            }
+
+            console.log('📞 Accepting order ID:', orderId);
+
+            // Call the actual order acceptance API
+            const response = await fetch('/api/orders/accept', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.sessionToken}`
+                },
+                body: JSON.stringify({
+                    orderId: orderId,
+                    notificationId: notificationId,
+                    acceptedVia: 'notification'
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to accept order');
+            }
+
+            const result = await response.json();
+            console.log('✅ Order accepted successfully:', result);
 
             // Show success message
-            this.showToast('🎉 Order accepted! Check your History page.', 'success');
+            this.showToast('🎉 Order accepted successfully!', 'success');
+
+            // Note: We don't need to call confirmNotification here because the API
+            // already handles the notification confirmation when accepting the order
 
             // Remove the notification from the current view and memory
             this.notifications = this.notifications.filter(n => n.id !== notificationId);
             this.removeFromMemory('notifications', notificationId);
 
-            // Invalidate accepted orders memory to force refresh
+            // Invalidate orders memory to force refresh
             if (this.smartMemory) {
                 this.smartMemory.acceptedOrders.lastUpdate = 0;
                 this.smartMemory.recentOrders.lastUpdate = 0;
@@ -5878,6 +5919,9 @@ class DeliveryApp {
             if (this.currentPage === 'notifications') {
                 this.renderNotifications(this.notifications);
             }
+
+            // Navigate to orders page to show accepted order
+            this.navigateToPage('orders');
 
         } catch (error) {
             console.error('Error accepting order:', error);
@@ -7275,7 +7319,7 @@ class DeliveryApp {
                             font-size: 13px;
                             color: #6b7280;
                             font-weight: 500;
-                        ">Per Order</div>
+                        " data-translate="perOrder">${window.t ? window.t('perOrder') : 'Per Order'}</div>
                     </div>
                 </div>
             </div>
@@ -7294,7 +7338,7 @@ class DeliveryApp {
                         color: #9ca3af;
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
-                    ">Account</div>
+                    " data-translate="account">${window.t ? window.t('account') : 'Account'}</div>
 
                     <!-- Settings -->
                     <div onclick="deliveryApp.openSettingsModal()" style="
@@ -7322,11 +7366,46 @@ class DeliveryApp {
                                 font-weight: 500;
                                 color: #111827;
                                 margin-bottom: 2px;
-                            ">Settings</div>
+                            " data-translate="settings">${window.t ? window.t('settings') : 'Settings'}</div>
                             <div style="
                                 font-size: 13px;
                                 color: #6b7280;
-                            ">Earnings and preferences</div>
+                            " data-translate="earningsPerOrderDesc">${window.t ? window.t('earningsPerOrderDesc') : 'Earnings and preferences'}</div>
+                        </div>
+                        <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                    </div>
+
+                    <!-- Language -->
+                    <div onclick="deliveryApp.openLanguageModal()" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 16px 20px;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="
+                            width: 40px;
+                            height: 40px;
+                            background: #f3f4f6;
+                            border-radius: 10px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-right: 16px;
+                        ">
+                            <i class="fas fa-globe" style="color: #6b7280; font-size: 18px;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="
+                                font-size: 16px;
+                                font-weight: 500;
+                                color: #111827;
+                                margin-bottom: 2px;
+                            " data-translate="languageSettings">${window.t ? window.t('languageSettings') : 'Language'}</div>
+                            <div style="
+                                font-size: 13px;
+                                color: #6b7280;
+                            " data-translate="languageSettingsDesc">${window.t ? window.t('languageSettingsDesc') : 'Choose your preferred language'}</div>
                         </div>
                         <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                     </div>
@@ -7355,7 +7434,7 @@ class DeliveryApp {
                                 font-weight: 500;
                                 color: #111827;
                                 margin-bottom: 2px;
-                            ">Account Info</div>
+                            " data-translate="accountInfo">${window.t ? window.t('accountInfo') : 'Account Info'}</div>
                             <div style="
                                 font-size: 13px;
                                 color: #6b7280;
@@ -7387,7 +7466,7 @@ class DeliveryApp {
                                 font-weight: 500;
                                 color: #111827;
                                 margin-bottom: 2px;
-                            ">Member Since</div>
+                            " data-translate="memberSince">${window.t ? window.t('memberSince') : 'Member Since'}</div>
                             <div style="
                                 font-size: 13px;
                                 color: #6b7280;
@@ -7408,7 +7487,7 @@ class DeliveryApp {
                         color: #9ca3af;
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
-                    ">Support</div>
+                    " data-translate="support">${window.t ? window.t('support') : 'Support'}</div>
 
                     <!-- Help Center -->
                     <div style="
@@ -7528,6 +7607,197 @@ class DeliveryApp {
         }
 
         console.log('Profile updated with mobile-friendly design v2');
+    }
+
+    // Open language selection modal
+    openLanguageModal() {
+        // Remove any existing modal
+        const existingModal = document.getElementById('language-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        const currentLang = window.i18n ? window.i18n.getCurrentLanguage() : 'en';
+        const modalHTML = `
+            <div id="language-modal" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 10000;
+                backdrop-filter: blur(4px);
+            ">
+                <div style="
+                    background: white;
+                    border-radius: 16px;
+                    width: 90%;
+                    max-width: 400px;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                ">
+                    <!-- Header -->
+                    <div style="
+                        padding: 24px 24px 16px;
+                        border-bottom: 1px solid #f3f4f6;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    ">
+                        <h3 style="
+                            margin: 0;
+                            font-size: 20px;
+                            font-weight: 600;
+                            color: #111827;
+                        " data-translate="languageModal">${window.t ? window.t('languageModal') : 'Language Selection'}</h3>
+                        <button onclick="document.getElementById('language-modal').remove()" style="
+                            background: none;
+                            border: none;
+                            font-size: 24px;
+                            color: #6b7280;
+                            cursor: pointer;
+                            padding: 4px;
+                            border-radius: 6px;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f3f4f6'" onmouseout="this.style.backgroundColor='transparent'">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <!-- Language Options -->
+                    <div style="padding: 24px;">
+                        <div class="language-option ${currentLang === 'en' ? 'selected' : ''}" data-lang="en" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 16px;
+                            border: 2px solid ${currentLang === 'en' ? '#3b82f6' : '#e5e7eb'};
+                            border-radius: 12px;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            margin-bottom: 12px;
+                            background: ${currentLang === 'en' ? '#eff6ff' : 'white'};
+                        " onmouseover="if(!this.classList.contains('selected')) this.style.borderColor='#d1d5db'" onmouseout="if(!this.classList.contains('selected')) this.style.borderColor='#e5e7eb'">
+                            <div style="
+                                font-size: 32px;
+                                margin-right: 16px;
+                            ">🇺🇸</div>
+                            <div style="flex: 1;">
+                                <h4 style="
+                                    margin: 0 0 4px 0;
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                    color: #111827;
+                                " data-translate="english">${window.t ? window.t('english') : 'English'}</h4>
+                                <p style="
+                                    margin: 0;
+                                    font-size: 14px;
+                                    color: #6b7280;
+                                ">English</p>
+                            </div>
+                            <div style="
+                                color: #3b82f6;
+                                font-size: 20px;
+                                opacity: ${currentLang === 'en' ? '1' : '0'};
+                                transition: opacity 0.2s;
+                            ">
+                                <i class="fas fa-check"></i>
+                            </div>
+                        </div>
+
+                        <div class="language-option ${currentLang === 'gr' ? 'selected' : ''}" data-lang="gr" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 16px;
+                            border: 2px solid ${currentLang === 'gr' ? '#3b82f6' : '#e5e7eb'};
+                            border-radius: 12px;
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            background: ${currentLang === 'gr' ? '#eff6ff' : 'white'};
+                        " onmouseover="if(!this.classList.contains('selected')) this.style.borderColor='#d1d5db'" onmouseout="if(!this.classList.contains('selected')) this.style.borderColor='#e5e7eb'">
+                            <div style="
+                                font-size: 32px;
+                                margin-right: 16px;
+                            ">🇬🇷</div>
+                            <div style="flex: 1;">
+                                <h4 style="
+                                    margin: 0 0 4px 0;
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                    color: #111827;
+                                " data-translate="greek">${window.t ? window.t('greek') : 'Greek'}</h4>
+                                <p style="
+                                    margin: 0;
+                                    font-size: 14px;
+                                    color: #6b7280;
+                                ">Ελληνικά</p>
+                            </div>
+                            <div style="
+                                color: #3b82f6;
+                                font-size: 20px;
+                                opacity: ${currentLang === 'gr' ? '1' : '0'};
+                                transition: opacity 0.2s;
+                            ">
+                                <i class="fas fa-check"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+        // Add click handlers for language options
+        const languageOptions = document.querySelectorAll('#language-modal .language-option');
+        languageOptions.forEach(option => {
+            option.addEventListener('click', async () => {
+                const selectedLang = option.getAttribute('data-lang');
+
+                // Remove selected class and styling from all options
+                languageOptions.forEach(opt => {
+                    opt.classList.remove('selected');
+                    opt.style.borderColor = '#e5e7eb';
+                    opt.style.background = 'white';
+                    opt.querySelector('div:last-child').style.opacity = '0';
+                });
+
+                // Add selected class and styling to clicked option
+                option.classList.add('selected');
+                option.style.borderColor = '#3b82f6';
+                option.style.background = '#eff6ff';
+                option.querySelector('div:last-child').style.opacity = '1';
+
+                // Change language
+                if (window.i18n) {
+                    const success = await window.i18n.setLanguage(selectedLang);
+                    if (success) {
+                        this.showToast(
+                            window.t ? window.t('settingsSaved') : 'Language changed successfully!',
+                            'success'
+                        );
+
+                        // Close modal after a short delay
+                        setTimeout(() => {
+                            document.getElementById('language-modal').remove();
+                        }, 500);
+                    } else {
+                        this.showToast('Failed to change language', 'error');
+                    }
+                }
+            });
+        });
+
+        // Close modal when clicking outside
+        document.getElementById('language-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'language-modal') {
+                document.getElementById('language-modal').remove();
+            }
+        });
     }
 
     // Open settings modal from profile page
@@ -8179,7 +8449,7 @@ class DeliveryApp {
                                 <i class="fas fa-user" style="color: #6366f1; font-size: 13px;"></i>
                             </div>
                             <div>
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${order.driver_email || (order.driver_id ? `Driver #${order.driver_id}` : 'Unknown')}</div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${order.driver_name || order.driver_email || (order.driver_id ? `Driver #${order.driver_id}` : 'Unknown')}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Driver</div>
                             </div>
                         </div>
@@ -9081,51 +9351,102 @@ class DeliveryApp {
         console.log('Enhanced back navigation prevention activated (no browser exit dialogs)');
     }
 
-    // Setup comprehensive push notification system
+    // Enhanced push notification system with better permission handling
     async setupPushNotifications() {
         try {
-            // Check if browser supports notifications
-            if (!('Notification' in window)) {
-                console.warn('This browser does not support notifications');
+            // Check browser compatibility
+            if (!this.checkNotificationSupport()) {
                 return;
             }
 
-            // Check if service worker is supported
-            if (!('serviceWorker' in navigator)) {
-                console.warn('Service workers not supported');
-                return;
-            }
-
-            // Request notification permission
+            // Get current permission status
             let permission = Notification.permission;
+            console.log('Current notification permission:', permission);
 
             if (permission === 'default') {
-                // Show custom permission modal first
-                this.showNotificationPermissionModal();
+                // Show enhanced permission modal
+                this.showEnhancedPermissionModal();
                 return;
             }
 
             if (permission === 'granted') {
-                console.log('Notification permission granted');
-                this.showToast('📱 Push notifications enabled! You\'ll receive updates even when the app is closed.', 'success');
+                console.log('✅ Notification permission granted');
 
-                // Setup push subscription
-                await this.setupPushSubscription();
+                // Setup push subscription with retry logic
+                const subscriptionSuccess = await this.setupPushSubscriptionWithRetry();
+
+                if (subscriptionSuccess) {
+                    this.showToast('🎉 Push notifications enabled! You\'ll receive order alerts even when the app is closed.', 'success');
+
+                    // Store permission status
+                    localStorage.setItem('notificationPermission', 'granted');
+                } else {
+                    this.showToast('⚠️ Push notifications partially enabled. Some features may not work.', 'warning');
+                }
 
             } else if (permission === 'denied') {
-                console.warn('Notification permission denied');
-                this.showToast('Notifications are blocked. Please enable them in your browser settings to receive updates.', 'warning');
+                console.warn('❌ Notification permission denied');
+                this.handlePermissionDenied();
             }
 
-            // Listen for messages from service worker
-            navigator.serviceWorker.addEventListener('message', (event) => {
-                if (event.data && event.data.type === 'notification_clicked') {
-                    this.handleNotificationClick(event.data.notificationId);
-                }
-            });
+            // Enhanced service worker message handling
+            this.setupServiceWorkerMessageHandling();
 
         } catch (error) {
             console.error('Error setting up push notifications:', error);
+            this.showToast('Failed to setup notifications. Please refresh and try again.', 'error');
+        }
+    }
+
+    // Check if browser supports notifications
+    checkNotificationSupport() {
+        if (!('Notification' in window)) {
+            console.warn('❌ Browser does not support notifications');
+            this.showToast('Your browser doesn\'t support push notifications. Please use a modern browser.', 'warning');
+            return false;
+        }
+
+        if (!('serviceWorker' in navigator)) {
+            console.warn('❌ Service workers not supported');
+            this.showToast('Your browser doesn\'t support background notifications.', 'warning');
+            return false;
+        }
+
+        if (!('PushManager' in window)) {
+            console.warn('❌ Push messaging not supported');
+            this.showToast('Push notifications are not supported on this device.', 'warning');
+            return false;
+        }
+
+        return true;
+    }
+
+    // Handle permission denied scenario
+    handlePermissionDenied() {
+        // Show helpful instructions
+        this.showPermissionDeniedModal();
+
+        // Store status
+        localStorage.setItem('notificationPermission', 'denied');
+
+        // Disable notification-related features
+        this.disableNotificationFeatures();
+    }
+
+    // Setup service worker message handling
+    setupServiceWorkerMessageHandling() {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data) {
+                    this.handleServiceWorkerMessage(event.data);
+                }
+            });
+
+            // Handle service worker updates
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                console.log('Service worker updated, reloading...');
+                window.location.reload();
+            });
         }
     }
 
@@ -9160,6 +9481,107 @@ class DeliveryApp {
         }
     }
 
+    // Enhanced push subscription setup with retry logic
+    async setupPushSubscriptionWithRetry(maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`🔄 Setting up push subscription (attempt ${attempt}/${maxRetries})`);
+
+                const registration = await navigator.serviceWorker.ready;
+                console.log('✅ Service worker ready');
+
+                // Check if we already have a subscription
+                let subscription = await registration.pushManager.getSubscription();
+
+                if (!subscription) {
+                    console.log('📝 Creating new push subscription');
+
+                    const applicationServerKey = this.getApplicationServerKey();
+
+                    subscription = await registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: this.urlBase64ToUint8Array(applicationServerKey)
+                    });
+
+                    console.log('✅ Created new push subscription');
+                } else {
+                    console.log('♻️ Using existing push subscription');
+                }
+
+                // Validate subscription
+                if (!subscription || !subscription.endpoint) {
+                    throw new Error('Invalid subscription created');
+                }
+
+                // Send subscription to server with retry
+                const serverSuccess = await this.sendSubscriptionToServerWithRetry(subscription);
+
+                if (serverSuccess) {
+                    console.log('🎉 Push subscription setup completed successfully');
+                    return true;
+                } else {
+                    throw new Error('Failed to register subscription with server');
+                }
+
+            } catch (error) {
+                console.error(`❌ Push subscription attempt ${attempt} failed:`, error);
+
+                if (attempt === maxRetries) {
+                    console.error('💥 All push subscription attempts failed');
+                    this.showToast('Failed to setup push notifications after multiple attempts.', 'error');
+                    return false;
+                }
+
+                // Wait before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+            }
+        }
+
+        return false;
+    }
+
+    // Send subscription to server with retry logic
+    async sendSubscriptionToServerWithRetry(subscription, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`📤 Sending subscription to server (attempt ${attempt}/${maxRetries})`);
+
+                const response = await fetch('/api/push/subscription', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.sessionToken}`
+                    },
+                    body: JSON.stringify({
+                        subscription: subscription,
+                        userId: this.userId,
+                        userType: 'driver'
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('✅ Subscription registered with server:', result);
+                    return true;
+                } else {
+                    throw new Error(`Server responded with status: ${response.status}`);
+                }
+
+            } catch (error) {
+                console.error(`❌ Server registration attempt ${attempt} failed:`, error);
+
+                if (attempt === maxRetries) {
+                    return false;
+                }
+
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+        }
+
+        return false;
+    }
+
     // Send subscription to server
     async sendSubscriptionToServer(subscription) {
         try {
@@ -9190,16 +9612,165 @@ class DeliveryApp {
         }
     }
 
-    // Handle notification click from service worker
-    handleNotificationClick(notificationId) {
-        if (notificationId) {
-            // Navigate to notifications page and highlight the clicked notification
-            this.navigateToPage('notifications');
+    // Enhanced service worker message handler
+    handleServiceWorkerMessage(data) {
+        console.log('Received message from service worker:', data);
 
-            // Mark notification as read
+        switch (data.type) {
+            case 'notification_clicked':
+                this.handleNotificationClick(data);
+                break;
+            case 'play_notification_sound':
+                this.playNotificationSound(data.strong || false);
+                break;
+            case 'order_accepted':
+                this.handleOrderAccepted(data);
+                break;
+            default:
+                console.log('Unknown service worker message type:', data.type);
+        }
+    }
+
+    // Handle notification click from service worker
+    handleNotificationClick(data) {
+        console.log('Handling notification click:', data);
+
+        const notificationId = data.notificationId || data;
+        const { orderId, action, shopName } = data;
+
+        // Navigate to appropriate page based on action
+        if (action === 'accept' && orderId) {
+            // Show order acceptance UI
+            this.showOrderAcceptanceModal(orderId, shopName);
+        } else if (orderId) {
+            // Navigate to orders page and highlight specific order
+            this.navigateToPage('orders');
+            setTimeout(() => {
+                this.highlightOrder(orderId);
+            }, 500);
+        } else {
+            // Default: navigate to notifications page
+            this.navigateToPage('notifications');
+        }
+
+        // Mark notification as read if ID provided
+        if (notificationId) {
             setTimeout(() => {
                 this.confirmNotification(notificationId);
             }, 500);
+        }
+
+        // Show toast with context
+        if (shopName) {
+            this.showToast(`📱 Opened order from ${shopName}`, 'info');
+        }
+    }
+
+    // Handle order accepted from service worker
+    handleOrderAccepted(data) {
+        console.log('Order accepted via notification:', data);
+
+        const { orderId, notificationId } = data;
+
+        // Refresh orders to show updated status
+        this.renderOrders();
+
+        // Mark related notification as read
+        if (notificationId) {
+            setTimeout(() => {
+                this.confirmNotification(notificationId);
+            }, 500);
+        }
+
+        // Show success message
+        this.showToast('✅ Order accepted successfully!', 'success');
+
+        // Navigate to orders page to show accepted order
+        this.navigateToPage('orders');
+    }
+
+    // Show order acceptance modal
+    showOrderAcceptanceModal(orderId, shopName) {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>🚚 Accept Order</h3>
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 48px; margin-bottom: 10px;">📦</div>
+                        <h4>New Order from ${shopName || 'Shop'}</h4>
+                        <p style="color: #666;">Order ID: ${orderId}</p>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary" onclick="deliveryApp.acceptOrderById('${orderId}'); this.closest('.modal-overlay').remove();">
+                            ✅ Accept Order
+                        </button>
+                        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove();">
+                            ❌ Decline
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Auto-close after 30 seconds
+        setTimeout(() => {
+            if (modal.parentNode) {
+                modal.remove();
+            }
+        }, 30000);
+    }
+
+    // Accept order by ID (direct order acceptance)
+    async acceptOrderById(orderId) {
+        try {
+            const response = await fetch('/api/orders/accept', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.sessionToken}`
+                },
+                body: JSON.stringify({
+                    orderId: orderId,
+                    acceptedVia: 'app'
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showToast('✅ Order accepted successfully!', 'success');
+                this.renderOrders(); // Refresh orders list
+                this.navigateToPage('orders');
+            } else {
+                throw new Error('Failed to accept order');
+            }
+        } catch (error) {
+            console.error('Error accepting order:', error);
+            this.showToast('❌ Failed to accept order. Please try again.', 'error');
+        }
+    }
+
+    // Highlight specific order in the orders list
+    highlightOrder(orderId) {
+        const orderElement = document.querySelector(`[data-order-id="${orderId}"]`);
+        if (orderElement) {
+            orderElement.style.backgroundColor = '#fff3cd';
+            orderElement.style.border = '2px solid #ffc107';
+            orderElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Remove highlight after 3 seconds
+            setTimeout(() => {
+                orderElement.style.backgroundColor = '';
+                orderElement.style.border = '';
+            }, 3000);
         }
     }
 
@@ -9529,7 +10100,8 @@ class DeliveryApp {
         const menu = document.getElementById('notifications-menu');
 
         if (!menuBtn || !menu) {
-            console.log('❌ Menu elements not found, retrying...');
+            console.log('❌ Menu elements not found, will retry when menu is created');
+            // Don't show error, just skip - will be called again when menu is created
             return;
         }
 
@@ -9590,15 +10162,23 @@ class DeliveryApp {
         // Create modern notifications menu button and dropdown
         console.log('🔧 Starting createNotificationsMenu...');
 
-        // Find the notifications-dashboard header (created by renderNotifications)
-        let notificationsHeader = document.querySelector('.notifications-dashboard .dashboard-header .header-left');
+        // Find the notifications page container (the actual structure created by renderNotifications)
+        const notificationsPage = document.getElementById('notifications-page');
 
-        if (!notificationsHeader) {
-            console.log('❌ Dashboard header not found, notifications may not be loaded yet');
+        if (!notificationsPage) {
+            console.log('❌ Notifications page not found, will retry when page is loaded');
             return;
         }
 
-        console.log('📍 Found dashboard header:', !!notificationsHeader);
+        // Look for the header area in the actual DOM structure
+        let headerArea = notificationsPage.querySelector('.orders-container > div:first-child');
+
+        if (!headerArea) {
+            console.log('❌ Header area not found, will retry when notifications are rendered');
+            return;
+        }
+
+        console.log('📍 Found header area:', !!headerArea);
 
         // Remove existing menu if any
         const existingMenu = document.getElementById('notifications-menu-container');
@@ -9805,18 +10385,11 @@ class DeliveryApp {
             </div>
         `;
 
-        // Insert into the dashboard header (next to the notifications title)
-        const dashboardHeader = document.querySelector('.notifications-dashboard .dashboard-header');
-        if (dashboardHeader) {
-            dashboardHeader.appendChild(menuContainer);
-            console.log('✅ Menu container added to dashboard header');
-        } else {
-            // Fallback to header-left if dashboard-header not found
-            notificationsHeader.appendChild(menuContainer);
-            console.log('✅ Menu container added to header-left');
-        }
+        // Insert into the header area (after the title and description)
+        headerArea.appendChild(menuContainer);
+        console.log('✅ Menu container added to header area');
 
-        console.log('📍 Header element:', notificationsHeader);
+        console.log('📍 Header element:', headerArea);
         console.log('📍 Menu container:', menuContainer);
 
         // Store reference for live updates

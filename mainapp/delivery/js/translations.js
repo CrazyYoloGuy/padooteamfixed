@@ -11,6 +11,7 @@ const translations = {
         notifications: "Notifications",
         settings: "Settings",
         profile: "Profile",
+        recent: "Recent",
         
         // Home Page
         driverDashboard: "Driver Dashboard",
@@ -97,6 +98,12 @@ const translations = {
         profileName: "Driver Name",
         profileEmail: "Email",
         logout: "Logout",
+        accountInfo: "Account Info",
+        memberSince: "Member Since",
+        perOrder: "Per Order",
+        account: "Account",
+        support: "Support",
+        helpCenter: "Help Center",
         
         // Modals
         addOrderModal: "Add New Order",
@@ -275,7 +282,16 @@ const translations = {
         browserNotificationsDesc: "Show desktop notifications even when the app is in background",
         
         // Floating Button
-        addOrderTooltip: "Add Order"
+        addOrderTooltip: "Add Order",
+
+        // Language Settings
+        languageSettings: "Language Settings",
+        languageSettingsDesc: "Choose your preferred language",
+        currentLanguage: "Current Language",
+        selectLanguage: "Select Language",
+        english: "English",
+        greek: "Greek",
+        languageModal: "Language Selection"
     },
     
     gr: {
@@ -289,6 +305,7 @@ const translations = {
         notifications: "Ειδοποιήσεις",
         settings: "Ρυθμίσεις",
         profile: "Προφίλ",
+        recent: "Πρόσφατα",
         
         // Home Page
         driverDashboard: "Πίνακας Ελέγχου Οδηγού",
@@ -375,6 +392,12 @@ const translations = {
         profileName: "Όνομα Οδηγού",
         profileEmail: "Email",
         logout: "Αποσύνδεση",
+        accountInfo: "Στοιχεία Λογαριασμού",
+        memberSince: "Μέλος Από",
+        perOrder: "Ανά Παραγγελία",
+        account: "Λογαριασμός",
+        support: "Υποστήριξη",
+        helpCenter: "Κέντρο Βοήθειας",
         
         // Modals
         addOrderModal: "Προσθήκη Νέας Παραγγελίας",
@@ -553,7 +576,16 @@ const translations = {
         browserNotificationsDesc: "Εμφάνιση ειδοποιήσεων επιφάνειας εργασίας ακόμα και όταν η εφαρμογή είναι στο παρασκήνιο",
         
         // Floating Button
-        addOrderTooltip: "Προσθήκη Παραγγελίας"
+        addOrderTooltip: "Προσθήκη Παραγγελίας",
+
+        // Language Settings
+        languageSettings: "Ρυθμίσεις Γλώσσας",
+        languageSettingsDesc: "Επιλέξτε την προτιμώμενη γλώσσα",
+        currentLanguage: "Τρέχουσα Γλώσσα",
+        selectLanguage: "Επιλογή Γλώσσας",
+        english: "Αγγλικά",
+        greek: "Ελληνικά",
+        languageModal: "Επιλογή Γλώσσας"
     }
 };
 
