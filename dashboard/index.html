@@ -155,8 +155,21 @@
         <!-- Main Content -->
         <main class="main-content">
             <header class="content-header">
-                <h1 id="page-title">Dashboard Overview</h1>
+                <div class="header-left">
+                    <h1 id="page-title">Dashboard Overview</h1>
+                    <p class="header-subtitle">Manage your delivery system</p>
+                </div>
                 <div class="header-actions">
+                    <div class="header-stats">
+                        <div class="header-stat">
+                            <span class="stat-value" id="header-active-drivers">0</span>
+                            <span class="stat-label">Active Drivers</span>
+                        </div>
+                        <div class="header-stat">
+                            <span class="stat-value" id="header-active-shops">0</span>
+                            <span class="stat-label">Active Shops</span>
+                        </div>
+                    </div>
                     <button class="btn primary" onclick="dashboard.refreshData()">
                         <i class="fas fa-sync-alt"></i>
                         Refresh

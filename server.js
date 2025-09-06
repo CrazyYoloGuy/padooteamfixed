@@ -564,16 +564,19 @@ app.post('/api/admin/users', async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user
+        // Create user with default name from email
+        const defaultName = email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1);
+
         const { data, error } = await supabase
             .from('users')
             .insert([{
                 id: uuidv4(),
                 email: email,
+                name: defaultName,
                 password: hashedPassword,
                 user_type: user_type
             }])
-            .select('id, email, user_type, created_at')
+            .select('id, email, name, user_type, created_at')
             .single();
 
         if (error) {
@@ -2204,90 +2207,80 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
             throw orderError;
         }
 
-        // Get all team members
-        const { data: teamMembers, error: teamError } = await supabase
-            .from('shop_team_members')
-            .select('driver_id')
-            .eq('shop_id', parseInt(shopId));
+        // Kick off notifications in the background to speed up response (fetch team members inside)
+        (async () => {
+            try {
+                const { data: teamMembers, error: teamError } = await supabase
+                    .from('shop_team_members')
+                    .select('driver_id')
+                    .eq('shop_id', parseInt(shopId));
 
-        if (teamError) {
-            console.error('Error loading team members:', teamError);
-            throw teamError;
-        }
+                if (teamError) {
+                    console.error('Error loading team members:', teamError);
+                    return;
+                }
 
-        if (teamMembers && teamMembers.length > 0) {
-            // Create notification message
-            const prepTimeText = preparation_time === 0 ? 'Ready Now' : `Ready in ${preparation_time} minutes`;
-            const orderMessage = `🚚 New Order Available!
-📦 Order #${orderData.id}
-💰 Amount: €${order_amount}
-📍 ${delivery_address}
-📞 ${customer_phone}
-⏰ ${prepTimeText}
-${customer_name ? `👤 ${customer_name}` : ''}
-${notes ? `📝 ${notes}` : ''}
+                const members = Array.isArray(teamMembers) ? teamMembers : [];
+                if (members.length === 0) return;
 
-Tap to accept this delivery order.`;
+                const prepTimeText = preparation_time === 0 ? 'Ready Now' : `Ready in ${preparation_time} minutes`;
+                const orderMessage = `🚚 New Order Available!\n📦 Order #${orderData.id}\n💰 Amount: €${order_amount}\n📍 ${delivery_address}\n📞 ${customer_phone}\n⏰ ${prepTimeText}\n${customer_name ? `👤 ${customer_name}` : ''}\n${notes ? `📝 ${notes}` : ''}\n\nTap to accept this delivery order.`;
 
-            // Prepare notifications for all team members
-            const notifications = teamMembers.map(member => ({
-                shop_id: parseInt(shopId),
-                driver_id: member.driver_id,
-                message: orderMessage,
-                order_id: orderData.id
-            }));
+                const notifications = members.map(member => ({
+                    shop_id: parseInt(shopId),
+                    driver_id: member.driver_id,
+                    message: orderMessage,
+                    order_id: orderData.id
+                }));
 
-            // Insert all notifications
-            const { data: notificationData, error: notificationError } = await supabase
-                .from('driver_notifications')
-                .insert(notifications)
-                .select('id, created_at, message, status, is_read, driver_id');
+                const { data: notificationData, error: notificationError } = await supabase
+                    .from('driver_notifications')
+                    .insert(notifications)
+                    .select('id, created_at, message, status, is_read, driver_id');
 
-            if (notificationError) {
-                console.error('Error creating notifications:', notificationError);
-                // Don't fail the order creation if notifications fail
-            } else {
-                console.log(`✅ Successfully sent ${notificationData.length} order notifications to team members`);
+                if (notificationError) {
+                    console.error('Error creating notifications:', notificationError);
+                    return;
+                }
 
-                // Broadcast real-time notifications to all team members
-                notificationData.forEach(async (notification) => {
-                    const realtimeNotification = {
-                        id: notification.id,
-                        message: notification.message,
-                        status: notification.status || 'pending',
-                        is_read: notification.is_read || false,
-                        created_at: notification.created_at,
-                        confirmed_at: null,
-                        order_id: orderData.id,
-                        shop: {
-                            id: parseInt(shopId),
-                            name: shopData.shop_name
-                        },
-                        shop_name: shopData.shop_name // Add this for backward compatibility
-                    };
-
-                    broadcastToUser(notification.driver_id, 'driver', realtimeNotification);
-
-                    // Send push notification
-                    await sendPushNotification(notification.driver_id, 'driver', {
-                        id: notification.id,
-                        title: `New Order from ${shopData.shop_name}`,
-                        message: `€${order_amount} delivery to ${delivery_address}`,
-                        shop_name: shopData.shop_name,
-                        order_id: orderData.id
-                    });
-                });
+                console.log(`✅ Queued ${notificationData.length} order notifications for team members`);
+                for (const notification of notificationData) {
+                    try {
+                        const realtimeNotification = {
+                            id: notification.id,
+                            message: notification.message,
+                            status: notification.status || 'pending',
+                            is_read: notification.is_read || false,
+                            created_at: notification.created_at,
+                            confirmed_at: null,
+                            order_id: orderData.id,
+                            shop: { id: parseInt(shopId), name: shopData.shop_name },
+                            shop_name: shopData.shop_name
+                        };
+                        broadcastToUser(notification.driver_id, 'driver', realtimeNotification);
+                        await sendPushNotification(notification.driver_id, 'driver', {
+                            id: notification.id,
+                            title: `New Order from ${shopData.shop_name}`,
+                            message: `€${order_amount} delivery to ${delivery_address}`,
+                            shop_name: shopData.shop_name,
+                            order_id: orderData.id
+                        });
+                    } catch (pushErr) {
+                        console.error('Push/broadcast failed for notification', notification.id, pushErr);
+                    }
+                }
+            } catch (bgErr) {
+                console.error('Background notification processing failed:', bgErr);
             }
-        }
+        })();
 
+        // Respond immediately; notifications continue in background
         res.json({
             success: true,
-            message: 'Order created and distributed to team members',
-            order: {
-                ...orderData,
-                shop_name: shopData.shop_name
-            },
-            notifications_sent: teamMembers ? teamMembers.length : 0
+            message: 'Order created; notifying your team',
+            order: { ...orderData, shop_name: shopData.shop_name },
+            notifications_sent: 0,
+            queued: true
         });
 
     } catch (error) {
@@ -2359,7 +2352,12 @@ app.get('/api/shop/:shopId/orders', authenticateUser, async (req, res) => {
                         .single();
 
                     if (!driverError && driverData) {
-                        return { ...order, users: driverData, driver_email: driverData.email };
+                        return {
+                            ...order,
+                            users: driverData,
+                            driver_name: driverData.name || 'Driver',
+                            driver_email: driverData.email
+                        };
                     }
                 } catch (err) {
                     console.warn(`Could not fetch driver info for order ${order.id}:`, err);
@@ -2549,7 +2547,10 @@ app.get('/api/recent-orders', authenticateUser, async (req, res) => {
                 .from('users')
                 .select('id, email, name')
                 .in('id', driverIds);
-            (drivers || []).forEach(d => driversMap.set(d.id, d.name || d.email));
+            (drivers || []).forEach(d => driversMap.set(d.id, {
+                name: d.name || 'Driver',
+                email: d.email
+            }));
         }
 
         // Format with batched lookup data
@@ -2563,7 +2564,8 @@ app.get('/api/recent-orders', authenticateUser, async (req, res) => {
             created_at: order.created_at,
             preparation_time: order.preparation_time,
             shop_name: shopsMap.get(order.shop_account_id) || 'Unknown Shop',
-            driver_email: driversMap.get(order.driver_id) || `Driver #${order.driver_id?.slice?.(0, 6)}`
+            driver_name: driversMap.get(order.driver_id)?.name || 'Driver',
+            driver_email: driversMap.get(order.driver_id)?.email || 'Unknown'
         }));
 
         // Cache the results server-side

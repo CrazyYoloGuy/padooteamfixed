@@ -63,12 +63,56 @@
 </head>
 <body class="shop-app">
     <div id="app">
-        <!-- App Header -->
-        <header class="app-header">
-            <div class="header-logo">
-                <img src="/plogo.png" alt="Padoo Delivery">
+        <!-- Professional Shop App Header -->
+        <header class="app-header" style="
+            background: #ffffff;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        ">
+            <!-- Header Content -->
+            <div style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+            ">
+                <!-- Logo and Title -->
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                ">
+                    <div class="header-logo" style="
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 8px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        overflow: hidden;
+                    ">
+                        <img src="/plogo.png" alt="Padoo Delivery" style="
+                            width: 100%;
+                            height: 100%;
+                            object-fit: contain;
+                            border-radius: 6px;
+                        ">
+                    </div>
+                    <div>
+                        <h1 class="app-title" style="
+                            font-size: 20px;
+                            font-weight: 700;
+                            color: #1f2937;
+                            margin: 0;
+                            letter-spacing: -0.2px;
+                        ">Shop Dashboard</h1>
+                    </div>
+                </div>
             </div>
-            <h1 class="app-title">Shop Dashboard</h1>
         </header>
         
         <!-- Alerts Page -->

@@ -32,6 +32,127 @@ class DeliveryApp {
 
         // Initialize translation system
         this.initTranslations();
+
+
+
+        // Apply modern UI enhancements immediately
+        setTimeout(() => this.applyModernUIEnhancements(), 100);
+    }
+
+    // Apply modern UI enhancements to ensure visual changes are visible
+    applyModernUIEnhancements() {
+        console.log('🎨 Applying modern UI enhancements...');
+
+        // Force modern navigation styling
+        const bottomNav = document.querySelector('.bottom-nav');
+        if (bottomNav) {
+            bottomNav.style.cssText += `
+                background: rgba(255, 255, 255, 0.95) !important;
+                backdrop-filter: blur(24px) !important;
+                -webkit-backdrop-filter: blur(24px) !important;
+                border-radius: 28px 28px 0 0 !important;
+                box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.08) !important;
+                padding: 16px 12px 24px 12px !important;
+            `;
+        }
+
+        // Force modern nav item styling
+        document.querySelectorAll('.nav-item').forEach((item, index) => {
+            item.style.cssText += `
+                padding: 12px 16px !important;
+                border-radius: 18px !important;
+                font-size: 11px !important;
+                font-weight: 600 !important;
+                letter-spacing: 0.3px !important;
+                text-transform: uppercase !important;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                position: relative !important;
+            `;
+
+            const icon = item.querySelector('i');
+            if (icon) {
+                icon.style.cssText += `
+                    font-size: 22px !important;
+                    margin-bottom: 6px !important;
+                    transition: all 0.3s ease !important;
+                `;
+            }
+
+            // Add hover effects
+            item.addEventListener('mouseenter', () => {
+                if (!item.classList.contains('active')) {
+                    item.style.cssText += `
+                        background: rgba(255, 107, 53, 0.08) !important;
+                        color: #ff6b35 !important;
+                        transform: translateY(-3px) scale(1.02) !important;
+                        box-shadow: 0 8px 25px rgba(255, 107, 53, 0.15) !important;
+                    `;
+                    if (icon) {
+                        icon.style.transform = 'scale(1.1)';
+                        icon.style.filter = 'drop-shadow(0 2px 6px rgba(255, 107, 53, 0.3))';
+                    }
+                }
+            });
+
+            item.addEventListener('mouseleave', () => {
+                if (!item.classList.contains('active')) {
+                    item.style.cssText += `
+                        background: transparent !important;
+                        color: #6b7280 !important;
+                        transform: none !important;
+                        box-shadow: none !important;
+                    `;
+                    if (icon) {
+                        icon.style.transform = 'none';
+                        icon.style.filter = 'none';
+                    }
+                }
+            });
+        });
+
+        // Force modern header styling
+        const appHeader = document.querySelector('.app-header');
+        if (appHeader) {
+            appHeader.style.cssText += `
+                background: linear-gradient(135deg, #ff6b35 0%, #ff8f65 50%, #e55a2b 100%) !important;
+                padding: 20px 24px !important;
+                box-shadow: 0 8px 32px rgba(255, 107, 53, 0.15) !important;
+                backdrop-filter: blur(20px) !important;
+            `;
+        }
+
+        const headerLogo = document.querySelector('.header-logo');
+        if (headerLogo) {
+            headerLogo.style.cssText += `
+                width: 44px !important;
+                height: 44px !important;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+                transition: all 0.3s ease !important;
+            `;
+
+            headerLogo.addEventListener('mouseenter', () => {
+                headerLogo.style.transform = 'scale(1.05) rotate(5deg)';
+                headerLogo.style.boxShadow = '0 6px 24px rgba(0, 0, 0, 0.2)';
+            });
+
+            headerLogo.addEventListener('mouseleave', () => {
+                headerLogo.style.transform = 'none';
+                headerLogo.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+            });
+        }
+
+        const appTitle = document.querySelector('.app-title');
+        if (appTitle) {
+            appTitle.style.cssText += `
+                font-size: 24px !important;
+                font-weight: 800 !important;
+                color: white !important;
+                letter-spacing: -0.5px !important;
+                text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+            `;
+        }
+
+        console.log('✨ Modern UI enhancements applied successfully!');
     }
 
     // ===== SMART MEMORY SYSTEM =====
@@ -342,6 +463,8 @@ class DeliveryApp {
         console.log('Main app initialization complete');
     }
 
+
+
     checkAuthStatus() {
         // Get user session data from localStorage
         const sessionData = localStorage.getItem('userSession');
@@ -557,12 +680,40 @@ class DeliveryApp {
             console.log('Stopped notification time updates');
         }
 
-        // Update navigation active state
+        // Update navigation active state with modern styling
         document.querySelectorAll('.nav-item').forEach(item => {
             if (item.getAttribute('data-page') === page) {
                 item.classList.add('active');
+                // Apply modern active styling
+                item.style.cssText += `
+                    background: linear-gradient(135deg, rgba(255, 107, 53, 0.12), rgba(255, 139, 101, 0.08)) !important;
+                    color: #ff6b35 !important;
+                    transform: translateY(-2px) !important;
+                    box-shadow: 0 6px 20px rgba(255, 107, 53, 0.2), 0 0 0 1px rgba(255, 107, 53, 0.1) inset !important;
+                `;
+                const icon = item.querySelector('i');
+                if (icon) {
+                    icon.style.cssText += `
+                        transform: scale(1.1) !important;
+                        filter: drop-shadow(0 2px 6px rgba(255, 107, 53, 0.3)) !important;
+                    `;
+                }
             } else {
                 item.classList.remove('active');
+                // Reset to inactive styling
+                item.style.cssText += `
+                    background: transparent !important;
+                    color: #6b7280 !important;
+                    transform: none !important;
+                    box-shadow: none !important;
+                `;
+                const icon = item.querySelector('i');
+                if (icon) {
+                    icon.style.cssText += `
+                        transform: none !important;
+                        filter: none !important;
+                    `;
+                }
             }
         });
 
@@ -655,6 +806,9 @@ class DeliveryApp {
                 const ordersResult = await ordersResponse.json();
                 this.orders = ordersResult.orders || [];
                 console.log(`✅ Loaded ${this.orders.length} orders for current user`);
+
+
+
                 this.updateStats();
                 this.updateRecentActivity();
             } else {
@@ -2549,6 +2703,11 @@ class DeliveryApp {
 
             this.showToast('🎉 Order completed successfully!', 'success');
 
+            // Update recent orders cache with completed order
+            if (result.order) {
+                this.updateRecentOrdersCache(result.order, 'completed');
+            }
+
             // Invalidate memory to force refresh
             if (this.smartMemory) {
                 this.smartMemory.acceptedOrders.lastUpdate = 0;
@@ -2557,6 +2716,11 @@ class DeliveryApp {
 
             // Refresh the orders list
             this.renderOrders();
+
+            // Refresh Recent Orders page if currently viewing it
+            if (this.currentPage === 'recent') {
+                this.loadRecentOrdersPage(false);
+            }
 
         } catch (error) {
             console.error('Error completing order:', error);
@@ -5651,6 +5815,8 @@ class DeliveryApp {
             this.updateNotificationBadge(unreadCount);
             console.log(`Successfully loaded ${this.notifications.length} notifications (${unreadCount} unread)`);
 
+
+
             // Start real-time updates for notification times
             this.startNotificationTimeUpdates();
 
@@ -8213,7 +8379,7 @@ class DeliveryApp {
                 text-align: center;
             ">
                 <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #374151;">Recent Activity</h3>
-                <p style="margin: 0; font-size: 14px; color: #6b7280;">Last 20 accepted orders (cached)</p>
+                <p style="margin: 0; font-size: 14px; color: #6b7280;">Last 20 accepted & completed orders (cached)</p>
             </div>
         `;
 
@@ -8233,7 +8399,7 @@ class DeliveryApp {
                 text-align: center;
             ">
                 <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #374151;">Recent Activity</h3>
-                <p style="margin: 0; font-size: 14px; color: #6b7280;">Last 20 accepted orders (fresh)</p>
+                <p style="margin: 0; font-size: 14px; color: #6b7280;">Last 20 accepted & completed orders (fresh)</p>
             </div>
             <div id="recent-orders-list"></div>
         `;
@@ -8278,6 +8444,38 @@ class DeliveryApp {
         } catch (error) {
             console.log('Background refresh failed:', error);
         }
+    }
+
+    // Update recent orders cache when order status changes
+    updateRecentOrdersCache(order, action) {
+        if (!this._recentOrdersCache || !this._recentOrdersCache.data) {
+            console.log('No recent orders cache to update');
+            return;
+        }
+
+        const orders = this._recentOrdersCache.data;
+        const existingIndex = orders.findIndex(o => o.id === order.id);
+
+        if (action === 'accepted') {
+            // Add new accepted order to the beginning
+            if (existingIndex === -1) {
+                orders.unshift(order);
+                // Keep only last 20 orders
+                if (orders.length > 20) {
+                    orders.splice(20);
+                }
+                console.log('Added new accepted order to recent orders cache');
+            }
+        } else if (action === 'completed') {
+            // Update existing order status to completed
+            if (existingIndex !== -1) {
+                orders[existingIndex] = { ...orders[existingIndex], ...order, status: 'delivered' };
+                console.log('Updated order status to completed in recent orders cache');
+            }
+        }
+
+        // Update cache timestamp
+        this._recentOrdersCache.time = Date.now();
     }
 
     // Create recent order card (display only, no management buttons) - matches History page exactly
@@ -8778,6 +8976,9 @@ class DeliveryApp {
         if (driverId === this.userId && data.order) {
             this.addToMemory('acceptedOrders', data.order);
             console.log('🧠 Added accepted order to memory');
+
+            // Update recent orders cache immediately
+            this.updateRecentOrdersCache(data.order, 'accepted');
         }
 
         // Remove from notifications if it was a notification
@@ -8786,6 +8987,11 @@ class DeliveryApp {
         // Update recent orders memory if needed
         if (data.order) {
             this.addToMemory('recentOrders', data.order);
+        }
+
+        // Refresh Recent Orders page if currently viewing it
+        if (this.currentPage === 'recent') {
+            this.loadRecentOrdersPage(false);
         }
     }
 
@@ -8799,7 +9005,17 @@ class DeliveryApp {
         // Update recent orders memory
         this.updateItemInMemory('recentOrders', orderId, { ...data.order, status: 'delivered' });
 
-        console.log('🧠 Updated order status to delivered in memory');
+        // Also update recent orders cache (used by UI) so the item flips to completed
+        if (data.order) {
+            this.updateRecentOrdersCache({ ...data.order, status: 'delivered' }, 'completed');
+        }
+
+        // If user is on Recent page, refresh it instantly
+        if (this.currentPage === 'recent') {
+            this.loadRecentOrdersPage(false);
+        }
+
+        console.log('🧠 Updated order status to delivered in memory and cache');
     }
 
     // Handle order removal (when another driver accepts it)

@@ -3,6 +3,10 @@ const translations = {
     en: {
         // App Header
         appTitle: "Padoo Delivery",
+        driverSubtitle: "Driver Dashboard",
+        available: "Available",
+        busy: "Busy",
+        offline: "Offline",
         
         // Navigation
         home: "Home",
@@ -297,6 +301,10 @@ const translations = {
     gr: {
         // App Header
         appTitle: "Padoo Delivery",
+        driverSubtitle: "Πίνακας Οδηγού",
+        available: "Διαθέσιμος",
+        busy: "Απασχολημένος",
+        offline: "Εκτός Σύνδεσης",
         
         // Navigation
         home: "Αρχική",

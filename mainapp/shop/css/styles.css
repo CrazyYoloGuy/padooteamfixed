@@ -34,9 +34,66 @@ body {
     overflow-x: hidden;
 }
 
+/* Desktop Responsive Container */
+@media (min-width: 768px) {
+    body {
+        background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    #app {
+        width: 480px; /* Slightly larger on desktop */
+        height: 92vh; /* Slightly taller to use more space */
+        max-height: 800px;
+        background: var(--background);
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Remove the indicator that might interfere with clicks */
+    #app::before {
+        display: none;
+    }
+
+    /* Make pages scrollable within the container */
+    .page {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    /* Adjust header to be fixed within container */
+    .app-header {
+        position: sticky !important;
+        top: 0;
+        z-index: 100;
+        flex-shrink: 0;
+    }
+}
+
+
+
 #app {
     min-height: 100vh;
     padding-bottom: 80px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Mobile layout adjustments */
+@media (max-width: 767px) {
+    #app {
+        display: block;
+    }
 }
 
 /* App Header with Logo */
@@ -273,46 +330,118 @@ body {
     transform: none;
 }
 
-/* Bottom Navigation */
+/* Professional Bottom Navigation - Matching Driver Side */
 .bottom-nav {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
+    background: #ffffff;
+    border-top: 1px solid #e5e7eb;
     display: flex;
-    padding: 8px 0;
+    justify-content: space-around;
+    padding: 12px 16px 20px 16px;
     z-index: 1000;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
 }
 
 .nav-item {
-    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 8px 4px;
-    background: none;
+    gap: 4px;
+    padding: 8px 12px;
     border: none;
-    color: var(--text-light);
+    background: none;
+    color: #6b7280;
     cursor: pointer;
-    transition: var(--transition);
-    font-size: 12px;
+    transition: all 0.2s ease;
+    border-radius: 12px;
+    min-width: 60px;
+    font-size: 10px;
     font-weight: 500;
+    position: relative;
 }
 
 .nav-item i {
-    font-size: 18px;
-    margin-bottom: 4px;
+    font-size: 20px;
+    transition: all 0.2s ease;
 }
 
 .nav-item.active {
     color: #ff6b35;
+    background: #fef7f0;
 }
 
-.nav-item:hover {
-    color: #ff6b35;
+.nav-item.active::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 2px;
+    background: #ff6b35;
+    border-radius: 1px;
+}
+
+.nav-item span {
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+/* Desktop responsive bottom navigation */
+@media (min-width: 768px) {
+    .bottom-nav {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        border-radius: 0 0 20px 20px;
+        flex-shrink: 0;
+    }
+
+    /* Adjust app padding to account for fixed bottom nav */
+    #app {
+        padding-bottom: 0;
+    }
+
+    /* Make page content area fill remaining space */
+    .page {
+        padding-bottom: 100px; /* Space for bottom nav */
+    }
+
+    /* Ensure modals and overlays work properly on desktop */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        max-width: 380px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+
+    /* Toast notifications positioning */
+    #toast-container {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10001;
+        max-width: 380px;
+        width: 90%;
+    }
 }
 
 /* Old toast notifications removed - using modern notifications only */
@@ -322,31 +451,31 @@ body {
     .page {
         padding: 16px;
     }
-    
+
     .page-header h2 {
         font-size: 20px;
     }
-    
+
     .coming-soon-icon {
         width: 60px;
         height: 60px;
         font-size: 24px;
     }
-    
+
     .coming-soon h3 {
         font-size: 18px;
     }
-    
+
     .profile-card {
         padding: 20px;
     }
-    
+
     .profile-avatar {
         width: 50px;
         height: 50px;
         font-size: 20px;
     }
-    
+
     /* Old toast container removed */
 }
 
@@ -708,20 +837,20 @@ body {
         align-items: stretch;
         gap: 12px;
     }
-    
+
     .search-box {
         max-width: none;
     }
-    
+
     .drivers-grid {
         grid-template-columns: 1fr;
         gap: 12px;
     }
-    
+
     .selected-drivers-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .pagination-controls {
         flex-wrap: wrap;
     }
@@ -958,7 +1087,7 @@ body {
     .modal-content {
         max-width: 100%;
     }
-    
+
     .form-group label {
         font-size: 14px;
     }
@@ -969,15 +1098,15 @@ body {
     .team-member-card {
         padding: 12px;
     }
-    
+
     .team-member-info {
         gap: 8px;
     }
-    
+
     .team-member-name {
         font-size: 13px;
     }
-    
+
     .micro-btn {
         padding: 4px 8px;
         font-size: 10px;
@@ -1407,53 +1536,53 @@ body {
     .notifications-container {
         padding: 16px;
     }
-    
+
     .notifications-stats-bar {
         grid-template-columns: 1fr;
         gap: 12px;
     }
-    
+
     .stat-card {
         padding: 16px;
     }
-    
+
     .stat-icon {
         width: 40px;
         height: 40px;
         font-size: 18px;
     }
-    
+
     .stat-number {
         font-size: 20px;
     }
-    
+
     .notifications-filters {
         flex-direction: column;
         gap: 4px;
     }
-    
+
     .filter-btn {
         justify-content: flex-start;
         padding: 12px 16px;
     }
-    
+
     .notification-card.shop-notification {
         padding: 16px;
         margin-bottom: 12px;
     }
-    
+
     .notification-card-header {
         flex-direction: column;
         gap: 12px;
         align-items: stretch;
     }
-    
+
     .notification-actions {
         flex-direction: column;
         gap: 8px;
         width: 100%;
     }
-    
+
     .action-btn {
         justify-content: center;
         width: 100%;
@@ -1625,35 +1754,35 @@ body {
         padding: 10px 12px;
         margin-bottom: 6px;
     }
-    
+
     .notification-row {
         gap: 10px;
     }
-    
+
     .notification-header {
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
     }
-    
+
     .driver-name {
         font-size: 12px;
     }
-    
+
     .notification-time {
         font-size: 10px;
     }
-    
+
     .notification-message-text {
         font-size: 12px;
     }
-    
+
     .status-indicator {
         width: 20px;
         height: 20px;
         font-size: 9px;
     }
-    
+
     .action-btn-slim {
         width: 20px;
         height: 20px;
@@ -1877,28 +2006,28 @@ body {
     .notification-card.simple {
         padding: 12px;
     }
-    
+
     .notification-header-simple {
         flex-direction: column;
         align-items: flex-start;
         gap: 8px;
     }
-    
+
     .message-content-simple {
         font-size: 13px;
         padding: 10px;
     }
-    
+
     .delete-btn-simple {
         padding: 5px 10px;
         font-size: 11px;
     }
-    
+
     .edit-btn-simple {
         padding: 5px 10px;
         font-size: 11px;
     }
-} 
+}
 
 /* Team Management Optimizations */
 .loading-state {
@@ -2422,60 +2551,60 @@ body {
         padding: 16px;
         border-radius: 12px;
     }
-    
+
     .widget-header {
         flex-direction: column;
         align-items: flex-start;
         gap: 12px;
     }
-    
+
     .view-all-btn {
         align-self: flex-end;
     }
-    
+
     .widget-notification-item {
         padding: 12px;
         gap: 12px;
     }
-    
+
     .notification-indicator {
         width: 32px;
         height: 32px;
         font-size: 14px;
     }
-    
+
     .notification-driver {
         font-size: 13px;
     }
-    
+
     .notification-preview {
         font-size: 12px;
     }
-    
+
     .notification-status-indicator {
         font-size: 10px;
         padding: 4px 8px;
     }
-    
+
     .profile-header-enhanced {
         flex-direction: column;
         text-align: center;
         gap: 16px;
     }
-    
+
     .profile-name-large {
         font-size: 20px;
     }
-    
+
     .profile-stats {
         grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
         gap: 12px;
     }
-    
+
     .profile-actions-enhanced {
         flex-direction: column;
     }
-} 
+}
 
 /* Add custom style for My Team action buttons */
 .my-team-actions {
@@ -2520,7 +2649,7 @@ body {
     color: #fff;
     border-color: var(--primary-dark);
     transform: translateY(-1px);
-} 
+}
 
 /* Notification animations */
 @keyframes highlight-notification {
@@ -4245,4 +4374,27 @@ body.shop-app, .notifications-container {
     .form-actions button {
         width: 100%;
     }
+}
+
+/* Desktop visibility and styling for Alerts action buttons */
+.section-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.slim-button {
+  background: #fff;
+  border: 1.5px solid #ffe5d0;
+  color: #ff6b35;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.slim-button:hover { background: #fff7f2; border-color: #ff6b35; }
+.slim-button i { font-size: 12px; }
+@media (min-width: 768px) {
+  .section-header.slim { align-items: center; }
+  .section-actions { justify-content: flex-end; }
 }

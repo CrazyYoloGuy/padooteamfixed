@@ -44,10 +44,11 @@ class ShopApp {
             return;
         }
 
-        // Prevent back button navigation to login page
+        // Prevent back button from navigating away; show notice instead
         window.history.replaceState(null, null, window.location.href);
         window.addEventListener('popstate', () => {
             window.history.pushState(null, null, window.location.href);
+            try { this.showToast('You cannot use the device back button here', 'info'); } catch (e) {}
         });
 
         // Initialize app components
@@ -906,7 +907,7 @@ class ShopApp {
     }
 
     // Add delivery management functionality
-    initDeliveryManagement() {
+    async initDeliveryManagement() {
         console.log('Initializing delivery management...');
 
         this.currentPage = 1;
@@ -916,8 +917,19 @@ class ShopApp {
         this.totalPages = 1;
 
         this.bindSettingsEvents();
+
+        // Load selected drivers first, then load available drivers
+        // This ensures proper filtering
+        try {
+            await this.loadSelectedDrivers();
+            console.log('✅ Selected drivers loaded, now loading available drivers');
+        } catch (error) {
+            console.warn('⚠️ Failed to load selected drivers, proceeding with empty list:', error);
+            this.selectedDrivers = [];
+        }
+
+        // Now load available drivers with proper filtering
         this.loadDrivers();
-        this.loadSelectedDrivers();
     }
 
     bindSettingsEvents() {
@@ -982,44 +994,114 @@ class ShopApp {
 
     async loadDrivers() {
         try {
+            // Show loading state immediately
+            const container = document.getElementById('drivers-list');
+            if (container && !container.querySelector('.loading')) {
+                container.innerHTML = `
+                    <div class="loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        Loading drivers...
+                    </div>
+                `;
+            }
+
             // If no search term, only load 5 random drivers (no pagination)
             const isSearch = !!this.searchTerm;
+
+            // Create cache key
+            const cacheKey = `${this.searchTerm || 'default'}_${isSearch ? this.currentPage : 1}_${isSearch ? this.driversPerPage : 5}`;
+
+            // Check cache first (cache for 30 seconds)
+            if (this.driverSearchCache && this.driverSearchCache[cacheKey]) {
+                const cached = this.driverSearchCache[cacheKey];
+                const now = Date.now();
+                if (now - cached.timestamp < 30000) { // 30 seconds cache
+                    console.log('🚀 Using cached drivers data');
+                    this.renderCachedDrivers(cached.data, isSearch);
+                    return;
+                }
+            }
+
             const params = new URLSearchParams({
                 page: isSearch ? this.currentPage : 1,
                 limit: isSearch ? this.driversPerPage : 5,
                 search: this.searchTerm || ''
             });
+
             const response = await fetch(`/api/shop/delivery-drivers?${params}`);
             const result = await response.json();
+
             if (result.success) {
-                const filteredDrivers = result.drivers.filter(driver =>
-                    !this.selectedDrivers.some(selected => selected.id === driver.id)
-                );
-                // If not searching, do not paginate, just show the 5 random drivers
-                if (!isSearch) {
-                    this.renderDrivers(filteredDrivers);
-                    this.renderPagination({ totalPages: 1, currentPage: 1, hasNext: false, hasPrevious: false });
-                    this.updateResultsCount(filteredDrivers.length);
-                    this.totalPages = 1;
-                } else {
-                const filteredTotalCount = result.pagination.totalCount - this.selectedDrivers.length;
-                const filteredTotalPages = Math.max(1, Math.ceil(filteredTotalCount / this.driversPerPage));
-                    const pagination = {
-                    ...result.pagination,
-                    totalCount: filteredTotalCount,
-                    totalPages: filteredTotalPages
-                    };
-                    this.renderDrivers(filteredDrivers);
-                    this.renderPagination(pagination);
-                this.updateResultsCount(filteredTotalCount);
-                this.totalPages = filteredTotalPages;
-                }
+                // Cache the result
+                if (!this.driverSearchCache) this.driverSearchCache = {};
+                this.driverSearchCache[cacheKey] = {
+                    timestamp: Date.now(),
+                    data: result
+                };
+
+                this.renderCachedDrivers(result, isSearch);
             } else {
                 throw new Error(result.message);
             }
         } catch (error) {
             console.error('Error loading drivers:', error);
             this.showToast('Failed to load drivers', 'error');
+
+            // Show error state
+            const container = document.getElementById('drivers-list');
+            if (container) {
+                container.innerHTML = `
+                    <div class="error-state">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Failed to load drivers</p>
+                        <button onclick="shopApp.loadDrivers()" class="retry-btn">Retry</button>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    async renderCachedDrivers(result, isSearch) {
+        // Ensure we have the latest selected drivers before filtering
+        if (!this.selectedDrivers || this.selectedDrivers.length === 0) {
+            try {
+                console.log('🔄 Refreshing selected drivers for accurate filtering...');
+                await this.loadSelectedDriversOptimized();
+            } catch (error) {
+                console.warn('⚠️ Could not refresh selected drivers, using current list:', error);
+            }
+        }
+
+        // Double-check filtering with both ID and email to be extra safe
+        const filteredDrivers = result.drivers.filter(driver => {
+            const isAlreadySelected = this.selectedDrivers.some(selected =>
+                selected.id === driver.id ||
+                selected.email === driver.email ||
+                selected.id.toString() === driver.id.toString()
+            );
+            return !isAlreadySelected;
+        });
+
+        console.log(`🔍 Filtered ${result.drivers.length} drivers to ${filteredDrivers.length} (excluded ${result.drivers.length - filteredDrivers.length} already selected)`);
+
+        // If not searching, do not paginate, just show the 5 random drivers
+        if (!isSearch) {
+            this.renderDrivers(filteredDrivers);
+            this.renderPagination({ totalPages: 1, currentPage: 1, hasNext: false, hasPrevious: false });
+            this.updateResultsCount(filteredDrivers.length);
+            this.totalPages = 1;
+        } else {
+            const filteredTotalCount = Math.max(0, result.pagination.totalCount - this.selectedDrivers.length);
+            const filteredTotalPages = Math.max(1, Math.ceil(filteredTotalCount / this.driversPerPage));
+            const pagination = {
+                ...result.pagination,
+                totalCount: filteredTotalCount,
+                totalPages: filteredTotalPages
+            };
+            this.renderDrivers(filteredDrivers);
+            this.renderPagination(pagination);
+            this.updateResultsCount(filteredTotalCount);
+            this.totalPages = filteredTotalPages;
         }
     }
 
@@ -1221,18 +1303,10 @@ class ShopApp {
                 if (!this.selectedDrivers.find(d => d.id === driverId)) {
                     this.selectedDrivers.push(newDriver);
                 }
-                // Remove the driver from the available drivers list instantly
-                // Find all cached driver lists and remove the driver
-                Object.keys(this.driverSearchCache).forEach(cacheKey => {
-                    const cache = this.driverSearchCache[cacheKey];
-                    if (cache && cache.data && cache.data.filteredDrivers) {
-                        cache.data.filteredDrivers = cache.data.filteredDrivers.filter(d => d.id !== driverId);
-                        // Optionally update the count
-                        if (cache.data.pagination) {
-                            cache.data.pagination.totalCount = Math.max(0, cache.data.pagination.totalCount - 1);
-                        }
-                    }
-                });
+                // Clear all driver cache to ensure fresh data
+                this.driverSearchCache = {};
+                console.log('🗑️ Cleared driver cache after adding driver');
+
                 // Re-render the drivers list for the current page
                 this.loadDrivers();
                 // Update UI everywhere else
@@ -1253,16 +1327,10 @@ class ShopApp {
                 if (!this.selectedDrivers.find(d => d.id === driverId)) {
                     this.selectedDrivers.push({ id: driverId, email: driverEmail, created_at: new Date().toISOString() });
                 }
-                // Remove from available drivers instantly
-                Object.keys(this.driverSearchCache).forEach(cacheKey => {
-                    const cache = this.driverSearchCache[cacheKey];
-                    if (cache && cache.data && cache.data.filteredDrivers) {
-                        cache.data.filteredDrivers = cache.data.filteredDrivers.filter(d => d.id !== driverId);
-                        if (cache.data.pagination) {
-                            cache.data.pagination.totalCount = Math.max(0, cache.data.pagination.totalCount - 1);
-                        }
-                    }
-                });
+                // Clear driver cache to ensure fresh data
+                this.driverSearchCache = {};
+                console.log('🗑️ Cleared driver cache after duplicate driver detection');
+
                 this.loadDrivers();
                 this.renderSelectedDrivers();
                 this.updateNotificationCount();
@@ -1330,11 +1398,16 @@ class ShopApp {
                 this.showToast('Driver removed from your team successfully!', 'success');
                 this.teamMembersCache = null;
                 this.teamMembersCacheTime = null;
+
+                // Clear driver cache to ensure fresh data
+                this.driverSearchCache = {};
+                console.log('🗑️ Cleared driver cache after removing driver');
+
                 this.selectedDrivers = this.selectedDrivers.filter(d => d.id !== driverId);
                 this.renderSelectedDrivers();
                 this.updateNotificationCount();
-                    this.renderDeliveryTeamForAlerts();
-                    this.loadDrivers();
+                this.renderDeliveryTeamForAlerts();
+                this.loadDrivers();
                 setTimeout(() => {
                     this.loadSelectedDriversOptimized(true);
                 }, 500);
@@ -2497,6 +2570,7 @@ class ShopApp {
             justify-content: center;
             z-index: 10000;
             padding: 0;
+            overflow: hidden;
         `;
 
         // Add slide-up animation CSS
@@ -2527,6 +2601,34 @@ class ShopApp {
             .modal-slide-down {
                 animation: slideDown 0.3s ease-in forwards;
             }
+
+            /* Desktop overrides: center modal, constrain size */
+            @media (min-width: 768px) {
+                #create-order-modal {
+                    align-items: center !important;
+                    padding: 24px !important;
+                }
+                #create-order-modal .modal-content {
+                    position: relative !important;
+                    max-width: 520px !important;
+                    width: 100% !important;
+                    height: auto !important;
+                    max-height: 90vh !important;
+                    border-radius: 16px !important;
+                    left: auto !important;
+                    right: auto !important;
+                    top: auto !important;
+                    bottom: auto !important;
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
+                }
+                #create-order-modal .modal-header {
+                    padding: 20px 24px !important;
+                }
+                /* Hide mobile handle on desktop */
+                #create-order-modal .modal-content > div[style*="width: 40px"][style*="height: 4px"] {
+                    display: none !important;
+                }
+            }
         `;
         document.head.appendChild(style);
 
@@ -2537,7 +2639,7 @@ class ShopApp {
                 width: 100%;
                 max-width: 100%;
                 height: auto;
-                max-height: 95vh;
+                max-height: 90vh;
                 overflow: hidden;
                 box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.12);
                 position: fixed;
@@ -2545,6 +2647,8 @@ class ShopApp {
                 left: 0;
                 right: 0;
                 animation: slideUp 0.3s ease-out;
+                display: flex;
+                flex-direction: column;
             ">
                 <!-- Modal Handle -->
                 <div style="
@@ -2588,9 +2692,10 @@ class ShopApp {
                 <!-- Form Content -->
                 <div style="
                     padding: 20px;
-                    max-height: calc(95vh - 120px);
+                    flex: 1;
                     overflow-y: auto;
                     -webkit-overflow-scrolling: touch;
+                    min-height: 0;
                 ">
                     <form id="create-order-form">
                         <!-- Payment Method -->
@@ -2791,9 +2896,11 @@ class ShopApp {
 
                 <!-- Simple Bottom Actions -->
                 <div style="
-                    padding: 16px 20px;
+                    padding: 16px 20px 20px 20px;
                     background: #ffffff;
                     border-top: 1px solid #f3f4f6;
+                    flex-shrink: 0;
+                    margin-top: auto;
                 ">
                     <div style="display: flex; gap: 12px;">
                         <button type="button" class="cancel-btn" style="
@@ -2949,8 +3056,6 @@ class ShopApp {
 
     async handleCreateOrderSubmit(modal) {
         const form = modal.querySelector('#create-order-form');
-        const submitBtn = modal.querySelector('.submit-btn');
-        const originalBtnText = submitBtn.innerHTML;
 
         // Get form data
         const formData = new FormData(form);
@@ -2966,35 +3071,27 @@ class ShopApp {
             this.showToast('Please enter a delivery address', 'error');
             return;
         }
-
         if (!phone.trim()) {
             this.showToast('Please enter a phone number', 'error');
             return;
         }
-
         if (paymentMethod === 'cash' && (!price || price <= 0)) {
             this.showToast('Please enter a valid order price for cash orders', 'error');
             return;
         }
 
-        // Show loading state
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Order...';
-        submitBtn.disabled = true;
-
+        // Get current shop ID from session
         try {
-            // Get current shop ID from session
             const shopId = this.currentShop?.id || this.shopId;
             if (!shopId) {
                 console.error('Shop ID not found. Current shop:', this.currentShop);
                 throw new Error('Shop ID not found');
             }
 
-            console.log('Using shop ID:', shopId);
-
             // Prepare order data
             const orderData = {
                 order_amount: paymentMethod === 'cash' ? parseFloat(price) : 0,
-                customer_name: '', // You can add a customer name field if needed
+                customer_name: '',
                 customer_phone: phone,
                 delivery_address: address,
                 notes: notes || '',
@@ -3002,51 +3099,67 @@ class ShopApp {
                 preparation_time: parseInt(preparationTime) || 0
             };
 
-            console.log('Creating order:', orderData);
+            // Optimistic UX: close immediately and show feedback
+            this.closeCreateOrderModal(modal);
+            this.showToast('Creating order...', 'info');
 
-            // Call the API to create order and distribute to drivers
+            // Call the API with timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+
             const response = await fetch(`/api/shop/${shopId}/orders`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.sessionToken}`
                 },
-                body: JSON.stringify(orderData)
+                body: JSON.stringify(orderData),
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
             const result = await response.json();
 
             if (!response.ok || !result.success) {
                 throw new Error(result.message || 'Failed to create order');
             }
 
-            // Show success message
-            this.showToast(`✅ Order created and sent to ${result.notifications_sent} drivers!`, 'success');
+            // Success feedback (handle queued fast-response)
+            if (result.queued) {
+                this.showToast('✅ Order created; notifying your team', 'success');
+            } else if (typeof result.notifications_sent === 'number') {
+                this.showToast(`✅ Order created and sent to ${result.notifications_sent} drivers!`, 'success');
+            } else {
+                this.showToast('✅ Order created!', 'success');
+            }
 
-            // Close modal
-            this.closeCreateOrderModal(modal);
-
-            console.log('Order created successfully:', result.order);
-
-            // Refresh the dashboard to show the new order
+            // Clear caches and refresh lightweight views in background
+            this._ordersCache = null;
             if (this.currentPage === 'dashboard') {
-                await this.loadDashboardData();
+                setTimeout(() => this.loadDashboardData(), 50);
             }
-
-            // Also refresh the orders page if it's currently active
             if (this.currentPage === 'orders') {
-                await this.loadOrdersContent();
+                setTimeout(() => this.loadOrdersContent(), 50);
             }
-
         } catch (error) {
             console.error('Error creating order:', error);
-            this.showToast(`Failed to create order: ${error.message}`, 'error');
-
-            // Restore button
-            submitBtn.innerHTML = originalBtnText;
-            submitBtn.disabled = false;
+            if (error.name === 'AbortError') {
+                this.showToast('Order creation timed out. Please try again.', 'error');
+            } else {
+                this.showToast(`Failed to create order: ${error.message}`, 'error');
+            }
         }
     }
+
+    // Helper method to optimistically add order to cache
+    addOrderToCache(newOrder) {
+        if (this._ordersCache && this._ordersCache.data) {
+            // Add to beginning of cached orders
+            this._ordersCache.data.unshift(newOrder);
+            console.log('Added new order to cache for instant UI update');
+        }
+    }
+
 
     closeCreateOrderModal(modal) {
         const modalContent = modal.querySelector('.modal-content');
@@ -4744,7 +4857,7 @@ class ShopApp {
             `;
 
             // Load the orders content
-            await this.loadDashboardOrdersContent();
+            await this.loadDashboardOrdersContentFast();
 
         } catch (error) {
             console.error('Error loading dashboard:', error);
@@ -4767,7 +4880,7 @@ class ShopApp {
         console.log('Switching dashboard filter to:', filter);
         this.currentDashboardFilter = filter;
 
-        // Update tab styles
+        // Update tab styles immediately for instant feedback
         const pendingTab = document.getElementById('dashboard-pending-tab');
         const acceptedTab = document.getElementById('dashboard-accepted-tab');
 
@@ -4785,8 +4898,19 @@ class ShopApp {
             }
         }
 
-        // Load content for the selected filter
-        await this.loadDashboardOrdersContent();
+        // Show loading state immediately
+        const contentArea = document.getElementById('dashboard-orders-content');
+        if (contentArea) {
+            contentArea.innerHTML = `
+                <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 16px;"></i>
+                    <p style="margin: 0; font-size: 14px;">Loading ${filter} orders...</p>
+                </div>
+            `;
+        }
+
+        // Load content for the selected filter (use cached data if available)
+        this.loadDashboardOrdersContentFast();
     }
 
     // Load orders content for dashboard
@@ -4867,12 +4991,129 @@ class ShopApp {
                     <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
                     <h3 style="margin: 0 0 8px 0; font-size: 18px;">Failed to load orders</h3>
                     <p style="margin: 0 0 16px 0; font-size: 14px;">Please try again</p>
-                    <button onclick="shopApp.loadDashboardOrdersContent()" style="
+                    <button onclick="shopApp.loadDashboardOrdersContentFast()" style="
                         background: #ff6b35; color: white; border: none; padding: 8px 16px;
                         border-radius: 6px; cursor: pointer; font-size: 14px;
                     ">Retry</button>
                 </div>
             `;
+        }
+    }
+
+    // Fast loading with cached data
+    async loadDashboardOrdersContentFast() {
+        const contentArea = document.getElementById('dashboard-orders-content');
+        if (!contentArea) return;
+
+        try {
+            // Use cached orders if available for instant display
+            let orders = this._ordersCache?.data;
+            let fromCache = false;
+
+            if (orders && this._ordersCache?.time && (Date.now() - this._ordersCache.time < 120000)) {
+                fromCache = true;
+                console.log('🚀 Using cached orders for instant filter switch');
+            } else {
+                // Load fresh orders
+                orders = await this.loadShopOrders();
+            }
+
+            this.renderDashboardOrders(orders, fromCache);
+
+            // If we used cache, refresh in background
+            if (fromCache) {
+                this.refreshDashboardOrdersBackground();
+            }
+
+        } catch (error) {
+            console.error('Error loading dashboard orders:', error);
+            contentArea.innerHTML = `
+                <div style="text-align: center; padding: 40px 20px; color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px;">Failed to load orders</h3>
+                    <p style="margin: 0 0 16px 0; font-size: 14px;">Please try again</p>
+                    <button onclick="shopApp.loadDashboardOrdersContentFast()" style="
+                        background: #ff6b35; color: white; border: none; padding: 8px 16px;
+                        border-radius: 6px; cursor: pointer; font-size: 14px;
+                    ">Retry</button>
+                </div>
+            `;
+        }
+    }
+
+    // Render dashboard orders with filtering
+    renderDashboardOrders(orders, fromCache = false) {
+        const contentArea = document.getElementById('dashboard-orders-content');
+        if (!contentArea) return;
+
+        // Filter orders based on current filter
+        let filteredOrders;
+        if (this.currentDashboardFilter === 'pending') {
+            filteredOrders = orders.filter(order => order.status === 'pending');
+        } else {
+            // Accepted tab shows only assigned and picked_up orders (not delivered)
+            filteredOrders = orders.filter(order =>
+                order.status === 'assigned' ||
+                order.status === 'picked_up'
+            );
+        }
+
+        if (filteredOrders.length === 0) {
+            const emptyMessage = this.currentDashboardFilter === 'pending'
+                ? 'No pending orders'
+                : 'No accepted orders';
+            const emptyDescription = this.currentDashboardFilter === 'pending'
+                ? 'Orders you create will appear here'
+                : 'Orders accepted by drivers will appear here';
+
+            contentArea.innerHTML = `
+                <div style="text-align: center; padding: 40px 20px; color: #6b7280;">
+                    <i class="fas fa-shopping-bag" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px; color: #374151;">${emptyMessage}</h3>
+                    <p style="margin: 0; font-size: 14px;">${emptyDescription}</p>
+                    ${fromCache ? '<small style="color: #9ca3af; font-size: 12px;">⚡ Cached</small>' : ''}
+                </div>
+            `;
+            return;
+        }
+
+        // Render orders (limit to 3 for dashboard)
+        const limitedOrders = filteredOrders.slice(0, 3);
+        const ordersHTML = limitedOrders.map(order => this.createOrderCard(order)).join('');
+
+        let viewAllButton = '';
+        if (filteredOrders.length > 3) {
+            viewAllButton = `
+                <div style="text-align: center; padding: 16px 0 0 0;">
+                    <button onclick="shopApp.navigateToPage('orders')" style="
+                        background: transparent; color: #ff6b35; border: 1px solid #ff6b35;
+                        padding: 8px 16px; border-radius: 6px; cursor: pointer;
+                        font-size: 14px; font-weight: 600;
+                    ">
+                        View All ${filteredOrders.length} Orders
+                    </button>
+                </div>
+            `;
+        }
+
+        const cacheIndicator = fromCache ? '<div style="text-align: center; margin-bottom: 8px;"><small style="color: #9ca3af; font-size: 11px;">⚡ Instant</small></div>' : '';
+        contentArea.innerHTML = cacheIndicator + ordersHTML + viewAllButton;
+
+        // Set up click listeners for order cards
+        this.setupShopOrderCardClickListeners();
+
+        // Initialize delivery timers for orders with delivery times
+        this.initializeShopDeliveryTimers(limitedOrders);
+    }
+
+    // Background refresh for dashboard orders
+    async refreshDashboardOrdersBackground() {
+        try {
+            const orders = await this.loadShopOrders();
+            this.renderDashboardOrders(orders, false);
+            console.log('Dashboard orders refreshed in background');
+        } catch (error) {
+            console.log('Background dashboard refresh failed:', error);
         }
     }
 
@@ -5153,7 +5394,7 @@ class ShopApp {
                             </div>
                             <div>
                                 <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">
-                                    ${order.driver_email || order.users?.email || 'Unknown Driver'}
+                                    ${order.users?.name || order.driver_name || order.users?.email || order.driver_email || 'Unknown Driver'}
                                 </div>
                                 <div style="color: #6b7280; font-size: 11px;">Driver</div>
                             </div>
@@ -5275,8 +5516,16 @@ class ShopApp {
                 throw new Error(data.message || 'Failed to load orders');
             }
 
-            console.log('Orders loaded successfully:', data.orders?.length || 0);
-            return data.orders || [];
+            const orders = data.orders || [];
+
+            // Cache the orders for fast filtering
+            this._ordersCache = {
+                time: Date.now(),
+                data: orders
+            };
+
+            console.log('Orders loaded successfully:', orders.length);
+            return orders;
         } catch (error) {
             console.error('Error in loadShopOrders:', error);
             throw error;
