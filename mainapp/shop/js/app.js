@@ -3621,6 +3621,10 @@ class ShopApp {
                 this.handleOrderUpdate(data);
                 break;
 
+            case 'order_accepted':
+                this.handleOrderAccepted(data);
+                break;
+
             default:
                 console.log('📨 Unknown WebSocket message type:', data.type);
         }
@@ -4653,10 +4657,67 @@ class ShopApp {
                 this.showToast('Order confirmed in real time', 'success');
             }
         }
+
+
+
         if (this.currentPage === 'alerts' || this.currentPage === 'orders') {
             this.renderOrdersPage();
         }
     }
+
+    // Handle order accepted by driver (live removal from Pending)
+    handleOrderAccepted(data) {
+        try {
+            const orderId = data.orderId || data.order_id || data.order?.id;
+            const driverId = data.driverId || data.accepted_by || data.order?.driver_id;
+            if (!orderId) return;
+
+            // Update cached orders so filters reflect new state instantly
+            if (this._ordersCache && this._ordersCache.data) {
+                const idx = this._ordersCache.data.findIndex(o => String(o.id) === String(orderId));
+                if (idx !== -1) {
+                    const updated = {
+                        ...this._ordersCache.data[idx],
+                        status: 'assigned',
+                        driver_id: driverId || this._ordersCache.data[idx].driver_id,
+                        updated_at: new Date().toISOString()
+                    };
+                    this._ordersCache.data[idx] = updated;
+                } else if (data.order && data.order.id) {
+                    // If server sent the full order, add it to cache (already assigned)
+                    this._ordersCache.data.unshift(data.order);
+                }
+            }
+
+            // Optimistic removal from any visible Pending list card
+            const card = document.querySelector(`[data-order-id="${orderId}"]`);
+            if (card) {
+                card.style.transition = 'opacity 120ms ease, height 150ms ease, margin 150ms ease, padding 150ms ease';
+                card.style.opacity = '0';
+                card.style.height = '0px';
+                card.style.margin = '0';
+                card.style.padding = '0';
+                setTimeout(() => card.remove(), 180);
+            }
+
+            // Refresh dashboard orders area if visible
+            if (this.currentPage === 'dashboard') {
+                const orders = this._ordersCache?.data || [];
+                this.renderDashboardOrders(orders, true);
+            }
+
+            // If Orders page is visible, re-render (in case it shows pending blocks)
+            if (this.currentPage === 'orders') {
+                this.renderOrdersPage();
+            }
+
+            // Subtle info toast for visibility
+            this.showToast('Order accepted by driver', 'info');
+        } catch (e) {
+            console.error('Error handling order_accepted:', e);
+        }
+    }
+
 
     async playNotificationSound(strong = false) {
         if (!this.isAudioEnabled) return;

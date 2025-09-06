@@ -1644,32 +1644,11 @@ class Dashboard {
                     this.showToast('Password must be at least 6 characters long', 'error');
                     return;
                 }
-                // Create driver via API
+                // Create driver via shared method (shows toasts and reloads)
                 try {
-                    const response = await fetch('/api/admin/users', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            email,
-                            password,
-                            user_type: 'driver',
-                            name,
-                            phone,
-                            afm
-                        })
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        this.showToast('Driver created successfully!', 'success');
-                        this.closeModal();
-                        await this.loadUsers();
-                        this.filteredDrivers = this.users.filter(u => u.user_type === 'driver');
-                        this.renderDrivers();
-                        this.updateStats();
-                    } else {
-                        throw new Error(result.message || 'Failed to create driver');
-                    }
+                    await this.createUser({ email, password, user_type: 'driver', name });
                 } catch (error) {
+                    // createUser already toasts, but keep a fallback here
                     this.showToast(error.message || 'Failed to create driver', 'error');
                 }
             });

@@ -536,66 +536,71 @@ app.get('/api/admin/users', async (req, res) => {
 // POST /api/admin/users - Create new user
 app.post('/api/admin/users', async (req, res) => {
     try {
-        const { email, password, user_type } = req.body;
+        const { email, password, user_type, name } = req.body;
+        const normalizedEmail = (email || '').trim().toLowerCase();
 
-        console.log('Creating user:', email, user_type);
+        console.log('Creating user:', normalizedEmail, user_type);
 
-        if (!email || !password || !user_type) {
+        if (!normalizedEmail || !password || !user_type) {
             return res.status(400).json({
                 success: false,
                 message: 'Email, password, and user type are required'
             });
         }
 
-        // Check if user already exists
+        // Ensure user_type is supported
+        const allowedTypes = new Set(['driver', 'admin']);
+        if (!allowedTypes.has(user_type)) {
+            return res.status(400).json({ success: false, message: 'Unsupported user type' });
+        }
+
+        // Check if email exists in drivers/users
         const { data: existingUser } = await supabase
             .from('users')
             .select('id')
-            .eq('email', email)
-            .single();
+            .eq('email', normalizedEmail)
+            .maybeSingle();
 
-        if (existingUser) {
-            return res.status(400).json({
+        // Also prevent conflict with shop accounts using the same email
+        const { data: existingShop } = await supabase
+            .from('shop_accounts')
+            .select('id')
+            .eq('email', normalizedEmail)
+            .maybeSingle();
+
+        if (existingUser || existingShop) {
+            return res.status(409).json({
                 success: false,
-                message: 'User already exists'
+                message: 'Email already exists'
             });
         }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user with default name from email
-        const defaultName = email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1);
+        // Choose name: provided or derived from email
+        const defaultName = normalizedEmail.split('@')[0];
+        const finalName = (name && String(name).trim()) || (defaultName.charAt(0).toUpperCase() + defaultName.slice(1));
 
         const { data, error } = await supabase
             .from('users')
             .insert([{
                 id: uuidv4(),
-                email: email,
-                name: defaultName,
+                email: normalizedEmail,
+                name: finalName,
                 password: hashedPassword,
                 user_type: user_type
             }])
             .select('id, email, name, user_type, created_at')
             .single();
 
-        if (error) {
-            throw error;
-        }
+        if (error) throw error;
 
         console.log('User created successfully:', data.id);
-
-        res.json({
-            success: true,
-            user: data
-        });
+        res.status(201).json({ success: true, user: data });
     } catch (error) {
         console.error('Error creating user:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create user',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Failed to create user', error: error.message });
     }
 });
 
@@ -5030,79 +5035,81 @@ async function sendPushNotification(userId, userType, notificationData) {
     }
 }
 
-// POST /api/orders/accept - Accept order from notification
+// POST /api/orders/accept - Accept order (fast response + real-time removal)
 app.post('/api/orders/accept', authenticateUser, async (req, res) => {
     try {
         const { orderId, acceptedVia, notificationId } = req.body;
         const driverId = req.userId;
 
         if (!orderId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Order ID is required'
-            });
+            return res.status(400).json({ success: false, message: 'Order ID is required' });
         }
 
         console.log(`📦 Driver ${driverId} accepting order ${orderId} via ${acceptedVia}`);
 
-        // Update order status to assigned
+        // 1) Atomically assign if still pending
         const { data: orderData, error: orderError } = await supabase
             .from('shop_orders')
-            .update({
-                driver_id: driverId,
-                status: 'assigned',
-                updated_at: new Date().toISOString()
-            })
+            .update({ driver_id: driverId, status: 'assigned', updated_at: new Date().toISOString() })
             .eq('id', orderId)
-            .eq('status', 'pending') // Only accept pending orders
+            .eq('status', 'pending')
             .select('*')
-            .single();
+            .maybeSingle();
 
-        if (orderError || !orderData) {
+        if (orderError) {
             console.error('Error accepting order:', orderError);
-            return res.status(400).json({
-                success: false,
-                message: 'Order not found or already assigned'
-            });
+            return res.status(500).json({ success: false, message: 'Failed to accept order' });
+        }
+        if (!orderData) {
+            return res.status(409).json({ success: false, code: 'ORDER_ALREADY_ACCEPTED', message: 'Order already accepted by another driver' });
         }
 
-        // Mark related notification as read if provided
-        if (notificationId) {
-            await supabase
-                .from('driver_notifications')
-                .update({
-                    is_read: true,
-                    status: 'confirmed',
-                    confirmed_at: new Date().toISOString()
-                })
-                .eq('id', notificationId)
-                .eq('driver_id', driverId);
+        // 2) Instantly remove from other drivers (websocket broadcast)
+        try {
+            broadcastOrderRemoval(orderId, driverId);
+        } catch (e) {
+            console.warn('Broadcast removal failed (non-fatal):', e);
         }
 
-        // Broadcast order update to shop
-        const shopNotification = {
-            type: 'order_accepted',
-            orderId: orderId,
-            driverId: driverId,
-            acceptedAt: new Date().toISOString(),
-            acceptedVia: acceptedVia
-        };
+        // 3) Respond immediately to the accepting driver
+        res.json({ success: true, message: 'Order accepted successfully', order: orderData, queued: true });
 
-        broadcastToUser(orderData.shop_account_id, 'shop', shopNotification);
+        // 4) Continue background tasks (do not await)
+        (async () => {
+            try {
+                // Mark related notification as read if provided
+                if (notificationId) {
+                    await supabase
+                        .from('driver_notifications')
+                        .update({ is_read: true, status: 'confirmed', confirmed_at: new Date().toISOString() })
+                        .eq('id', notificationId)
+                        .eq('driver_id', driverId);
+                }
 
-        res.json({
-            success: true,
-            message: 'Order accepted successfully',
-            order: orderData
-        });
+                // Remove notifications for this order from other drivers
+                await supabase
+                    .from('driver_notifications')
+                    .delete()
+                    .eq('order_id', orderId)
+                    .neq('driver_id', driverId);
+
+                // Notify the shop in real-time
+                const shopNotification = {
+                    type: 'order_accepted',
+                    orderId: orderId,
+                    driverId: driverId,
+                    acceptedAt: new Date().toISOString(),
+                    acceptedVia: acceptedVia
+                };
+                broadcastToUser(orderData.shop_account_id, 'shop', shopNotification);
+            } catch (bgErr) {
+                console.error('Background tasks for accept failed:', bgErr);
+            }
+        })();
 
     } catch (error) {
         console.error('Error accepting order:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to accept order',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Failed to accept order', error: error.message });
     }
 });
 
