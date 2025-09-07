@@ -248,6 +248,56 @@ function broadcastOrderRemoval(orderId, acceptingDriverId) {
     });
 }
 
+// --- Notification safety helpers ---
+function extractOrderIdFromMessage(message) {
+    try {
+        const msg = (message || '').toString();
+        const m = msg.match(/Order\s*#\s*(\d+)/i);
+        return m ? parseInt(m[1], 10) : null;
+    } catch { return null; }
+}
+
+function isOrderLikeMessage(message) {
+    const msg = (message || '').toString();
+    return /Order\s*#\s*\d+/i.test(msg) || /New Order/i.test(msg) || /Tap to accept/i.test(msg);
+}
+
+function buildDriverNotificationPayload({ shopId, driverId, message, orderId }) {
+    const payload = {
+        shop_id: parseInt(shopId),
+        driver_id: driverId,
+        message: message
+    };
+
+    // Normalize orderId if provided
+    if (orderId !== undefined && orderId !== null && orderId !== '') {
+        const oid = parseInt(orderId, 10);
+        if (Number.isNaN(oid) || oid <= 0) {
+            const err = new Error('Invalid order_id provided');
+            err.statusCode = 400;
+            throw err;
+        }
+        payload.order_id = oid;
+        return payload;
+    }
+
+    // If message looks like an order, try to extract an ID
+    if (isOrderLikeMessage(message)) {
+        const extracted = extractOrderIdFromMessage(message);
+        if (extracted) {
+            payload.order_id = extracted;
+            return payload;
+        }
+        const err = new Error('Order-like notification requires order_id');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Generic message (non-order), no order_id
+    return payload;
+}
+
+
 // Enhanced real-time notification updates with cross-platform support
 function handleNotificationUpdate(ws, data) {
     const client = clients.get(ws);
@@ -1949,7 +1999,7 @@ app.delete('/api/shop/:shopId/remove-driver/:driverId', async (req, res) => {
 app.post('/api/shop/:shopId/notify-driver/:driverId', async (req, res) => {
     try {
         const { shopId, driverId } = req.params;
-        const { message } = req.body;
+        const { message, order_id } = req.body;
 
         if (!shopId || !driverId || !message) {
             return res.status(400).json({
@@ -1972,15 +2022,21 @@ app.post('/api/shop/:shopId/notify-driver/:driverId', async (req, res) => {
             throw shopError;
         }
 
+
+        // Build a safe payload (prevents sending order-like messages without order_id)
+        let payload;
+        try {
+            payload = buildDriverNotificationPayload({ shopId, driverId, message, orderId: order_id });
+        } catch (e) {
+            const code = e.statusCode || 400;
+            return res.status(code).json({ success: false, message: e.message });
+        }
+
         // Store the notification in the database
         const { data, error } = await supabase
             .from('driver_notifications')
-            .insert([{
-                shop_id: parseInt(shopId),
-                driver_id: driverId,
-                message: message
-            }])
-            .select('id, created_at, message, status, is_read')
+            .insert([payload])
+            .select('id, created_at, message, status, is_read, order_id')
             .single();
 
         if (error) {
@@ -1998,6 +2054,8 @@ app.post('/api/shop/:shopId/notify-driver/:driverId', async (req, res) => {
             is_read: data.is_read || false,
             created_at: data.created_at,
             confirmed_at: null,
+            order_id: (data.order_id || payload.order_id) || null,
+
             shop: {
                 id: shopData.id,
                 name: shopData.shop_name,
@@ -2008,9 +2066,11 @@ app.post('/api/shop/:shopId/notify-driver/:driverId', async (req, res) => {
         broadcastToUser(driverId, 'driver', realtimeNotification);
 
         // Send push notification to driver's mobile device
+        const pushTitle = ((data.order_id || payload.order_id) ? `New order from ${shopData.shop_name}` : `New message from ${shopData.shop_name}`);
+
         await sendPushNotification(driverId, 'driver', {
             id: data.id,
-            title: `New order from ${shopData.shop_name}`,
+            title: pushTitle,
             message: data.message,
             shop_name: shopData.shop_name
         });
@@ -2048,7 +2108,7 @@ app.post('/api/shop/:shopId/notify-driver/:driverId', async (req, res) => {
 app.post('/api/shop/:shopId/notify-team', async (req, res) => {
     try {
         const { shopId } = req.params;
-        const { message } = req.body;
+        const { message, order_id } = req.body;
 
         if (!shopId || !message) {
             return res.status(400).json({
@@ -2089,18 +2149,20 @@ app.post('/api/shop/:shopId/notify-team', async (req, res) => {
             });
         }
 
-        // Prepare notifications for all team members
-        const notifications = teamMembers.map(member => ({
-            shop_id: parseInt(shopId),
-            driver_id: member.driver_id,
-            message: message
-        }));
+        // Prepare notifications for all team members (validated)
+        let notifications;
+        try {
+            notifications = teamMembers.map(member => buildDriverNotificationPayload({ shopId, driverId: member.driver_id, message, orderId: order_id }));
+        } catch (e) {
+            const code = e.statusCode || 400;
+            return res.status(code).json({ success: false, message: e.message });
+        }
 
         // Insert all notifications
         const { data, error } = await supabase
             .from('driver_notifications')
             .insert(notifications)
-            .select('id, created_at, message, status, is_read, driver_id');
+            .select('id, created_at, message, status, is_read, driver_id, order_id');
 
         if (error) {
             console.error('Error creating notifications:', error);
@@ -2118,6 +2180,7 @@ app.post('/api/shop/:shopId/notify-team', async (req, res) => {
                 is_read: notificationData.is_read || false,
                 created_at: notificationData.created_at,
                 confirmed_at: null,
+                order_id: notificationData.order_id || null,
                 shop: {
                     id: shopData.id,
                     name: shopData.shop_name,
@@ -2128,9 +2191,10 @@ app.post('/api/shop/:shopId/notify-team', async (req, res) => {
             broadcastToUser(notificationData.driver_id, 'driver', realtimeNotification);
 
             // Send push notification to each driver's mobile device
+            const pushTitle = (notificationData.order_id ? `New order from ${shopData.shop_name}` : `Team notification from ${shopData.shop_name}`);
             await sendPushNotification(notificationData.driver_id, 'driver', {
                 id: notificationData.id,
-                title: `Team notification from ${shopData.shop_name}`,
+                title: pushTitle,
                 message: notificationData.message,
                 shop_name: shopData.shop_name
             });
@@ -2168,14 +2232,56 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
         const { shopId } = req.params;
         const { order_amount, customer_name, customer_phone, delivery_address, notes, payment_method, preparation_time } = req.body;
 
-        if (!order_amount || !customer_phone || !delivery_address) {
+        // Normalize payment method and validate inputs
+        const method = (payment_method || 'cash').toString().toLowerCase().trim();
+        const isPaid = ['paid', 'card', 'credit', 'online'].includes(method);
+
+        if (!customer_phone || !delivery_address) {
             return res.status(400).json({
                 success: false,
-                message: 'Order amount, customer phone, and delivery address are required'
+                message: 'Customer phone and delivery address are required'
             });
+        }
+        // For cash orders, require a positive amount; for paid/card, amount is optional and stored as NULL
+        if (!isPaid) {
+            const amt = parseFloat(order_amount);
+            if (!amt || Number.isNaN(amt) || amt <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Order amount must be greater than 0 for cash payments'
+                });
+            }
         }
 
         console.log(`Shop ${shopId} creating new order:`, { order_amount, customer_name, customer_phone, delivery_address, preparation_time });
+
+        // Duplicate protection (soft idempotency): avoid creating duplicates within the last 60 seconds
+        try {
+            const { data: recentOrders } = await supabase
+                .from('shop_orders')
+                .select('id, created_at, order_amount, customer_phone, delivery_address, notes, payment_method, status')
+                .eq('shop_account_id', parseInt(shopId))
+                .eq('customer_phone', customer_phone)
+                .eq('delivery_address', delivery_address)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false })
+                .limit(15);
+
+            const amtNumber = parseFloat(order_amount || 0);
+            const duplicate = (recentOrders || []).find(o => {
+                const pm = (o.payment_method || 'cash').toString().toLowerCase();
+                const paidLike = ['paid', 'card', 'credit', 'online'].includes(pm);
+                const sameNotes = (o.notes || '') === (notes || '');
+                const sameAmount = paidLike ? (amtNumber === 0 || o.order_amount === null || parseFloat(o.order_amount || 0) === 0) : (parseFloat(o.order_amount || 0) === amtNumber);
+                return pm === method && sameNotes && sameAmount;
+            });
+
+            if (duplicate) {
+                return res.json({ success: true, queued: true, order: duplicate, duplicate: true });
+            }
+        } catch (e) {
+            console.warn('Soft idempotency check failed (continuing):', e?.message || e);
+        }
 
         // Get shop details
         const { data: shopData, error: shopError } = await supabase
@@ -2192,15 +2298,17 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
         }
 
         // Create the order in shop_orders table
+        const normalizedAmount = isPaid ? null : parseFloat(order_amount);
         const { data: orderData, error: orderError } = await supabase
             .from('shop_orders')
             .insert([{
                 shop_account_id: parseInt(shopId),
-                order_amount: parseFloat(order_amount),
+                order_amount: normalizedAmount,
                 customer_name: customer_name || '',
                 customer_phone: customer_phone,
                 delivery_address: delivery_address,
                 notes: notes || '',
+                payment_method: method,
                 status: 'pending',
                 preparation_time: parseInt(preparation_time) || 0
             }])
@@ -2229,7 +2337,8 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                 if (members.length === 0) return;
 
                 const prepTimeText = preparation_time === 0 ? 'Ready Now' : `Ready in ${preparation_time} minutes`;
-                const orderMessage = `🚚 New Order Available!\n📦 Order #${orderData.id}\n💰 Amount: €${order_amount}\n📍 ${delivery_address}\n📞 ${customer_phone}\n⏰ ${prepTimeText}\n${customer_name ? `👤 ${customer_name}` : ''}\n${notes ? `📝 ${notes}` : ''}\n\nTap to accept this delivery order.`;
+                const amountOrPaid = isPaid ? '💳 Payment: Card (Paid)' : `💰 Amount: €${parseFloat(order_amount).toFixed(2)}`;
+                const orderMessage = `🚚 New Order Available!\n📦 Order #${orderData.id}\n${amountOrPaid}\n📍 ${delivery_address}\n📞 ${customer_phone}\n⏰ ${prepTimeText}\n${customer_name ? `👤 ${customer_name}` : ''}\n${notes ? `📝 ${notes}` : ''}\n\nTap to accept this delivery order.`;
 
                 const notifications = members.map(member => ({
                     shop_id: parseInt(shopId),

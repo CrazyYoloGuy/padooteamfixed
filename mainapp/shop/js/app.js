@@ -3016,6 +3016,7 @@ class ShopApp {
         const form = modal.querySelector('#create-order-form');
         form.addEventListener('submit', (e) => {
             e.preventDefault();
+            if (this._creatingOrder) return; // prevent double-submit
             this.handleCreateOrderSubmit(modal);
         });
 
@@ -3063,6 +3064,13 @@ class ShopApp {
         const price = formData.get('price');
         const address = formData.get('address');
         const phone = formData.get('phone');
+        // Prevent duplicate submissions and show loading state
+        if (this._creatingOrder) return;
+        this._creatingOrder = true;
+        const submitBtn = modal.querySelector('.submit-btn');
+        const originalBtnText = submitBtn ? submitBtn.innerHTML : null;
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = 'Creating...'; }
+
         const notes = formData.get('notes');
         const preparationTime = formData.get('preparation-time');
 
@@ -3089,6 +3097,10 @@ class ShopApp {
             }
 
             // Prepare order data
+            // Idempotency key (prevents duplicates if user taps multiple times)
+            const idemKey = this._activeIdempotencyKey || `shop-${shopId}-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+            this._activeIdempotencyKey = idemKey;
+
             const orderData = {
                 order_amount: paymentMethod === 'cash' ? parseFloat(price) : 0,
                 customer_name: '',
@@ -3111,7 +3123,8 @@ class ShopApp {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.sessionToken}`
+                    'Authorization': `Bearer ${this.sessionToken}`,
+                    'Idempotency-Key': idemKey
                 },
                 body: JSON.stringify(orderData),
                 signal: controller.signal
@@ -3134,6 +3147,16 @@ class ShopApp {
             }
 
             // Clear caches and refresh lightweight views in background
+            // Clear idempotency/lock flags after attempt
+            this._creatingOrder = false;
+            // Also clear lock on failure
+            this._creatingOrder = false;
+            this._activeIdempotencyKey = null;
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText || 'Create Order'; }
+
+            this._activeIdempotencyKey = null;
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText || 'Create Order'; }
+
             this._ordersCache = null;
             if (this.currentPage === 'dashboard') {
                 setTimeout(() => this.loadDashboardData(), 50);

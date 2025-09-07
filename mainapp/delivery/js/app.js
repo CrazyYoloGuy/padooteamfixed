@@ -2034,7 +2034,10 @@ class DeliveryApp {
             return;
         }
 
-        const ordersHTML = activeOrders.map(order => this.createAcceptedOrderCard(order)).join('');
+        const ordersHTML = (activeOrders || [])
+            .filter(o => o && o.id && o.created_at)
+            .map(o => { try { return this.createAcceptedOrderCard(o); } catch (e) { console.warn('Skipping corrupt order', o?.id, e); return ''; } })
+            .join('');
         container.innerHTML = ordersHTML;
         this.setupOrderCardClickListeners();
 
@@ -2151,6 +2154,8 @@ class DeliveryApp {
 
             if (!order) {
                 console.error('❌ Order not found in accepted orders');
+
+
                 this.showToast('Order not found', 'error');
                 return;
             }
@@ -2162,6 +2167,16 @@ class DeliveryApp {
             // Show modal with explicit styles for testing
             console.log('🎭 Showing modal...');
             modal.style.display = 'flex';
+
+            // Guard against corrupted orders (missing critical fields)
+            if (!order.id || !order.created_at) {
+                console.warn('Removing corrupt order from view:', order);
+                const card = document.querySelector(`[data-order-id="${orderId}"]`);
+                if (card) card.remove();
+                this.showToast('This order had invalid data and was removed from the list.', 'warning');
+                return;
+            }
+
             modal.style.position = 'fixed';
             modal.style.top = '0';
             modal.style.left = '0';
@@ -2245,6 +2260,11 @@ class DeliveryApp {
                          order.status === 'picked_up' ? 'Picked Up' :
                          order.status === 'delivered' ? 'Delivered' : 'Unknown';
 
+        // Normalize payment method display for this modal (infer from amount if missing)
+        const inferredMethodForModal = order?.payment_method || ((order?.order_amount === null || order?.order_amount === undefined || parseFloat(order?.order_amount) === 0) ? 'paid' : 'cash');
+        const paymentDisplay = this.getPaymentMethodDisplay(inferredMethodForModal);
+
+
         content.innerHTML = `
             <div style="padding: 20px;">
                 <!-- Status Badge -->
@@ -2269,7 +2289,7 @@ class DeliveryApp {
                     <div style="display: grid; gap: 12px;">
                         <div style="display: flex; justify-content: space-between;">
                             <span style="color: #6b7280;">Order Amount:</span>
-                            <span style="font-weight: 600; color: #111827;">€${parseFloat(order.order_amount || 0).toFixed(2)}</span>
+                            <span style="font-weight: 600; color: #111827;">${(paymentDisplay === 'Paid' || parseFloat(order.order_amount || 0) === 0) ? '-' : `€${parseFloat(order.order_amount || 0).toFixed(2)}`}</span>
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span style="color: #6b7280;">Your Earnings:</span>
@@ -2277,7 +2297,7 @@ class DeliveryApp {
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span style="color: #6b7280;">Payment Method:</span>
-                            <span style="font-weight: 600; color: #111827;">${order.payment_method || 'Not specified'}</span>
+                            <span style="font-weight: 600; color: #111827;">${paymentDisplay || 'Not specified'}</span>
                         </div>
                         <div style="display: flex; justify-content: space-between;">
                             <span style="color: #6b7280;">Preparation Time:</span>
@@ -2426,6 +2446,7 @@ class DeliveryApp {
         const timeAgo = this.formatTimeAgo(order.created_at);
         const orderPrice = parseFloat(order.order_amount || 0).toFixed(2);
         const driverEarnings = parseFloat(order.driver_earnings || 1.50).toFixed(2);
+        const paymentDisplay = this.getPaymentMethodDisplay(order.payment_method);
 
         // Determine status color and text
         const statusColor = order.status === 'assigned' ? '#f59e0b' :
@@ -4875,11 +4896,11 @@ class DeliveryApp {
                         <div>
                             <div style="font-size: 11px; color: #075985; text-transform: uppercase; margin-bottom: 4px;">Payment Method</div>
                             <div style="color: #0369a1; font-size: 13px; font-weight: 500; text-transform: capitalize;">
-                                ${this.getPaymentMethodDisplay(order.payment_method)}
+                                ${this.getPaymentMethodDisplay(order?.payment_method || ((order?.order_amount === null || order?.order_amount === undefined || parseFloat(order?.order_amount) === 0) ? 'paid' : 'cash'))}
                             </div>
                         </div>
                         <div style="color: #0369a1; font-size: 18px;">
-                            <i class="fas ${this.getPaymentMethodIcon(order.payment_method)}"></i>
+                            <i class="fas ${this.getPaymentMethodIcon(order?.payment_method || ((order?.order_amount === null || order?.order_amount === undefined || parseFloat(order?.order_amount) === 0) ? 'paid' : 'cash'))}"></i>
                         </div>
                     </div>
 
@@ -6031,14 +6052,40 @@ class DeliveryApp {
 
             console.log('📦 Found notification:', notification);
 
-            // Extract order ID from notification
+            // Extract order ID from notification with robust fallbacks
             let orderId = null;
             if (notification.order_id) {
                 orderId = notification.order_id;
                 console.log('✅ Found order_id in notification:', orderId);
             } else {
-                console.error('❌ No order_id in notification. Notification data:', notification);
-                throw new Error('Order ID not found in notification. This notification may not be an order notification.');
+                // Fallback 1: parse from message (e.g., "Order #1234")
+                const rawMsg = (notification.message || '').toString();
+                const msg = this.unescapeHTML ? this.unescapeHTML(rawMsg) : rawMsg;
+                const match = msg.match(/Order\s*#\s*(\d+)/i);
+                if (match && match[1]) {
+                    orderId = match[1];
+                    console.log('🧩 Parsed order_id from message:', orderId);
+                }
+
+                // If still missing, do not throw hard error; surface friendly notice and remove this broken item
+                if (!orderId) {
+                    console.warn('⚠️ Notification has no order_id and none could be parsed. Notification:', notification);
+                    this.showToast('This item is not linked to an order and was removed.', 'warning');
+
+                    // Remove from local list so it doesn’t block the flow
+                    this.notifications = (this.notifications || []).filter(n => n.id !== notificationId);
+                    if (this.currentPage === 'notifications') {
+                        this.renderNotifications(this.notifications);
+                        this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
+                    }
+
+                    // Restore button state if present
+                    if (button) {
+                        button.innerHTML = originalText || '<i class="fas fa-check"></i> Accept Order';
+                        button.disabled = false;
+                    }
+                    return; // gracefully exit
+                }
             }
 
             console.log('📞 Accepting order ID:', orderId);
@@ -6058,8 +6105,22 @@ class DeliveryApp {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to accept order');
+                let errorData = {};
+                try { errorData = await response.json(); } catch (e) {}
+                const msg = (errorData && errorData.message) ? errorData.message : 'Failed to accept order';
+
+                // If server says order is gone/invalid or already taken, remove this notification to keep flow clean
+                const stale = [404, 409, 410].includes(response.status) || /not\s*found|already\s*(accepted|assigned)|invalid\s*order/i.test(msg);
+                if (stale) {
+                    this.notifications = (this.notifications || []).filter(n => n.id !== notificationId);
+                    if (this.currentPage === 'notifications') {
+                        this.renderNotifications(this.notifications);
+                        this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
+                    }
+                    this.showToast('This order is no longer available and was removed.', 'info');
+                }
+
+                throw new Error(msg);
             }
 
             const result = await response.json();
@@ -6161,7 +6222,7 @@ class DeliveryApp {
                     <h3 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700;">Order #${orderId}</h3>
                     <div style="display: flex; justify-content: center; gap: 12px; align-items: center;">
                         <span style="background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;">${paymentMethod}</span>
-                        <span style="font-size: 18px; font-weight: 700;">€${amount}</span>
+                        ${parseFloat(amount) > 0 ? `<span style="font-size: 18px; font-weight: 700;">€${amount}</span>` : ''}
                     </div>
                 </div>
 
@@ -6234,7 +6295,7 @@ class DeliveryApp {
                             font-weight: 600;
                             cursor: pointer;
                         ">Close</button>
-                        ${notification.status === 'pending' ? `
+                        ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
                             <button data-accept-order="true" data-notification-id="${notificationId}" onclick="deliveryApp.acceptOrder('${notificationId}', this); this.closest('[style*=\"position: fixed\"]').remove();" style="
                                 flex: 2;
                                 background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -6330,7 +6391,7 @@ class DeliveryApp {
                         display: inline-block;
                     ">${shopName}</div>
                     <h2 style="margin: 0 0 8px 0; font-size: 24px; font-weight: 700;">Order #${orderId}</h2>
-                    <p style="margin: 0; opacity: 0.9; font-size: 16px;">€${amount}</p>
+                    <p style="margin: 0; opacity: 0.9; font-size: 16px;">${parseFloat(amount) > 0 ? `€${amount}` : 'Card'}</p>
                 </div>
 
                 <!-- Content -->
@@ -6382,7 +6443,7 @@ class DeliveryApp {
                             font-weight: 500;
                             cursor: pointer;
                         ">Close</button>
-                        ${notification.status === 'pending' ? `
+                        ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
                             <button data-accept-order="true" data-notification-id="${notificationId}" onclick="deliveryApp.acceptOrder('${notificationId}', this); this.closest('[style*=\"position: fixed\"]').remove();" style="
                                 flex: 2;
                                 background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -6545,7 +6606,7 @@ class DeliveryApp {
                                 font-weight: 700;
                                 color: #111827;
                                 line-height: 1;
-                            ">€${amount}</div>
+                            ">${parseFloat(amount) > 0 ? `€${amount}` : 'Card'}</div>
                             <span style="
                                 background: #ff6b35;
                                 color: white;
@@ -6657,7 +6718,7 @@ class DeliveryApp {
                     </div>
 
                     <!-- Compact Action Buttons -->
-                    ${notification.status === 'pending' ? `
+                    ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
                         <div style="display: flex; gap: 8px; margin-top: 14px;">
                             <button
                                 type="button"
@@ -8384,7 +8445,10 @@ class DeliveryApp {
         `;
 
         // Render all at once for cached data (instant)
-        const ordersHTML = orders.map(order => this.createRecentOrderCard(order)).join('');
+        const ordersHTML = (orders || [])
+            .filter(o => o && o.id && o.created_at)
+            .map(o => { try { return this.createRecentOrderCard(o); } catch (e) { console.warn('Skipping corrupt recent order', o?.id, e); return ''; } })
+            .join('');
         container.innerHTML = headerHTML + ordersHTML;
     }
 
@@ -8409,13 +8473,19 @@ class DeliveryApp {
 
         // Render first 8 cards immediately for instant feedback
         const firstBatch = orders.slice(0, 8);
-        const firstHTML = firstBatch.map(order => this.createRecentOrderCard(order)).join('');
+        const firstHTML = firstBatch
+            .filter(o => o && o.id && o.created_at)
+            .map(o => { try { return this.createRecentOrderCard(o); } catch (e) { console.warn('Skipping corrupt recent order', o?.id, e); return ''; } })
+            .join('');
         listEl.innerHTML = firstHTML;
 
         // Render remaining cards in next frame
         if (orders.length > 8) {
             requestAnimationFrame(() => {
-                const remainingHTML = orders.slice(8).map(order => this.createRecentOrderCard(order)).join('');
+                const remainingHTML = orders.slice(8)
+                    .filter(o => o && o.id && o.created_at)
+                    .map(o => { try { return this.createRecentOrderCard(o); } catch (e) { console.warn('Skipping corrupt recent order', o?.id, e); return ''; } })
+                    .join('');
                 listEl.insertAdjacentHTML('beforeend', remainingHTML);
             });
         }
@@ -8552,13 +8622,26 @@ class DeliveryApp {
                             </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; min-width: 80px;">
-                            <div style="
-                                font-size: 18px;
-                                font-weight: 700;
-                                color: #111827;
-                                line-height: 1;
-                                text-align: right;
-                            ">€${orderPrice}</div>
+                            ${ (this.getPaymentMethodDisplay(order.payment_method) === 'Paid' || parseFloat(order.order_amount || 0) === 0) ? `
+                                <div style="
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    color: #0ea5e9;
+                                    line-height: 1;
+                                    text-align: right;
+                                    background: #e0f2fe;
+                                    padding: 4px 8px;
+                                    border-radius: 6px;
+                                ">Card</div>
+                            ` : `
+                                <div style="
+                                    font-size: 18px;
+                                    font-weight: 700;
+                                    color: #111827;
+                                    line-height: 1;
+                                    text-align: right;
+                                ">€${orderPrice}</div>
+                            `}
                             <span style="
                                 background: ${statusColor};
                                 color: white;
