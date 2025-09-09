@@ -60,6 +60,9 @@ class ShopApp {
         this.initializeAudio();
         this.connectWebSocket();
 
+        // Subscribe to admin announcements (localStorage/BroadcastChannel)
+        this.subscribeAnnouncements();
+
         // Request notification permission
         this.requestNotificationPermission();
 
@@ -524,6 +527,10 @@ class ShopApp {
                 this.stopTimestampUpdates();
                 this.loadProfileData();
                 break;
+            case 'announcements':
+                this.stopTimestampUpdates();
+                this.loadAnnouncementsPage();
+                break;
         }
     }
 
@@ -659,6 +666,127 @@ class ShopApp {
     loadShopProfile() {
         console.log('Loading shop profile...');
         this.updateProfileDisplay();
+    }
+
+    loadAnnouncementsPage() {
+        console.log('Loading announcements page...');
+        const pageRoot = document.getElementById('announcements-page');
+        if (!pageRoot) return;
+        const content = pageRoot.querySelector('.announcements-content');
+        if (!content) return;
+
+        // Preserve original empty-state markup to restore when needed
+        if (!this._announcementsEmptyHTML) {
+            this._announcementsEmptyHTML = content.innerHTML;
+        }
+
+        let announcements = [];
+        try {
+            announcements = JSON.parse(localStorage.getItem('announcements') || '[]');
+        } catch (e) {
+            announcements = [];
+        }
+        // Newest first
+        announcements.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        // Remove big white wrapper styling when we have real items
+        if (!announcements.length) {
+            content.style.background = '';
+            content.style.border = '';
+            content.style.boxShadow = '';
+            content.style.padding = '';
+            content.innerHTML = this._announcementsEmptyHTML;
+            return;
+        }
+        content.style.background = 'transparent';
+        content.style.border = 'none';
+        content.style.boxShadow = 'none';
+        content.style.padding = '0 8px 24px';
+
+        const itemHTML = (a) => {
+            const d = new Date(a.created_at);
+            const date = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+            const color = a.importance === 'high' ? '#ef4444' : a.importance === 'medium' ? '#f59e0b' : '#10b981';
+            const label = a.importance?.[0]?.toUpperCase() + a.importance?.slice(1) + ' Importance';
+            return `
+                <div style="background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:16px 16px 14px; box-shadow:0 2px 12px rgba(0,0,0,.06);">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div style="width:34px; height:34px; border-radius:8px; background:${color}1A; color:${color}; display:flex; align-items:center; justify-content:center;">
+                                <i class="fas fa-bullhorn"></i>
+                            </div>
+                            <div style="font-weight:600; color:#111827;">Announcement</div>
+                        </div>
+                        <span style="font-size:12px; color:#6b7280;">${date} ${time}</span>
+                    </div>
+                    <div style="color:#111827; font-size:14px; line-height:1.5;">${a.message}</div>
+                    <div style="margin-top:10px; font-size:12px; color:${color}; display:inline-flex; align-items:center; gap:6px; background:${color}0F; padding:6px 10px; border-radius:999px;">
+                        <i class="fas fa-circle" style="font-size:6px;"></i>
+                        ${label}
+                    </div>
+                </div>`;
+        };
+
+        content.innerHTML = `
+            <div style="display:flex; flex-direction:column; gap:14px;">${announcements.map(itemHTML).join('')}</div>
+        `;
+
+        // Mark as viewed for this shop and broadcast
+        this.markAnnouncementsViewed(announcements);
+    }
+
+    subscribeAnnouncements() {
+        // Live updates via BroadcastChannel and storage events
+        try {
+            if (window.BroadcastChannel) {
+                this._annBC = new BroadcastChannel('announcements');
+                this._annBC.onmessage = (ev) => {
+                    if (ev?.data?.type === 'updated' && this.currentPage === 'announcements') {
+                        this.loadAnnouncementsPage();
+                    }
+                };
+            }
+        } catch (e) {
+            console.warn('BroadcastChannel unavailable', e);
+        }
+
+        window.addEventListener('storage', (e) => {
+            if ((e.key === 'announcements' || e.key === 'announcements_updated_at') && this.currentPage === 'announcements') {
+                this.loadAnnouncementsPage();
+            }
+        });
+    }
+
+    markAnnouncementsViewed(announcements) {
+        try {
+            const shopId = this.currentShop?.id || this.shopId || 'unknown';
+            if (!shopId) return;
+            let views = {};
+            try { views = JSON.parse(localStorage.getItem('announcement_views') || '{}'); } catch (_) {}
+            let changed = false;
+            announcements.forEach(a => {
+                const id = a.id;
+                if (!views[id]) views[id] = {};
+                if (!views[id][shopId]) {
+                    views[id][shopId] = { ts: Date.now() };
+                    changed = true;
+                }
+            });
+            if (changed) {
+                localStorage.setItem('announcement_views', JSON.stringify(views));
+                localStorage.setItem('announcement_views_updated_at', String(Date.now()));
+                try {
+                    if (window.BroadcastChannel) {
+                        const bc = new BroadcastChannel('announcement_views');
+                        bc.postMessage({ type: 'updated' });
+                        bc.close();
+                    }
+                } catch (_) {}
+            }
+        } catch (e) {
+            console.warn('Failed to mark announcements viewed', e);
+        }
     }
 
     loadOrdersData() {
@@ -2123,6 +2251,41 @@ class ShopApp {
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
                     ">Account</div>
+
+                    <!-- Announcements -->
+                    <div onclick="shopApp.navigateToPage('announcements')" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 16px 20px;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="
+                            width: 40px;
+                            height: 40px;
+                            background: #fef3c7;
+                            border-radius: 10px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-right: 16px;
+                        ">
+                            <i class="fas fa-bullhorn" style="color: #f59e0b; font-size: 18px;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="
+                                font-size: 16px;
+                                font-weight: 500;
+                                color: #111827;
+                                margin-bottom: 2px;
+                            ">Announcements</div>
+                            <div style="
+                                font-size: 13px;
+                                color: #6b7280;
+                            ">Important updates from admins</div>
+                        </div>
+                        <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                    </div>
 
                     <!-- Settings -->
                     <div onclick="shopApp.showPasswordModal()" style="

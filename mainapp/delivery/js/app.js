@@ -448,8 +448,8 @@ class DeliveryApp {
         await this.loadSettingsData();
         await this.loadCategories();
 
-        // Setup push notifications (temporarily disabled for debugging)
-        // await this.setupPushNotifications();
+        // Setup push notifications
+        await this.setupPushNotifications();
 
         // Navigate to home page
         this.navigateToPage('home');

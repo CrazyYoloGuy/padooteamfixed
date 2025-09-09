@@ -225,22 +225,13 @@ self.addEventListener('push', (event) => {
       orderAmount: notificationData.order_amount || null,
       shopName: notificationData.shop_name || null,
       orderId: notificationData.order_id || null,
+      userId: notificationData.userId || (notificationData.data && notificationData.data.userId) || null,
       ...notificationData.data
     },
     actions: [
       {
         action: 'accept',
         title: '✅ Accept Order',
-        icon: '/icons/icon-192x192.png'
-      },
-      {
-        action: 'view',
-        title: '👀 View Details',
-        icon: '/icons/icon-192x192.png'
-      },
-      {
-        action: 'dismiss',
-        title: '❌ Dismiss',
         icon: '/icons/icon-192x192.png'
       }
     ]
@@ -513,7 +504,8 @@ async function handleOrderAcceptance(notificationData) {
       body: JSON.stringify({
         orderId: orderId,
         notificationId: notificationId,
-        acceptedVia: 'notification'
+        acceptedVia: 'notification',
+        userId: notificationData.userId || null
       })
     });
 

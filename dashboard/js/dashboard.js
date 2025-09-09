@@ -12,7 +12,7 @@ class Dashboard {
         this.filteredDrivers = [];
         this.driversToShow = 4;
         this.driverObserver = null;
-        
+
         // Session management
         this.sessionTimeout = 15 * 60 * 1000; // 15 minutes in milliseconds
         this.sessionCheckInterval = null;
@@ -21,10 +21,10 @@ class Dashboard {
         this.sessionStartTime = null;
         this.sessionManagementActive = false;
         this.activityEventsBound = false;
-        
+
         this.init();
     }
-    
+
     init() {
         console.log('Dashboard initializing...');
         this.bindEvents();
@@ -32,7 +32,7 @@ class Dashboard {
         this.setupShopFilter();
         this.setupDriverSection();
     }
-    
+
     bindEvents() {
         // Navigation
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -53,7 +53,7 @@ class Dashboard {
                 }
             });
         }
-        
+
         // Search and filters
         const userSearch = document.getElementById('user-search');
         if (userSearch) {
@@ -61,29 +61,30 @@ class Dashboard {
                 this.filterUsers(e.target.value);
             });
         }
-        
+
         const userFilter = document.getElementById('user-filter');
         if (userFilter) {
             userFilter.addEventListener('change', (e) => {
                 this.filterUsers(document.getElementById('user-search').value, e.target.value);
             });
         }
-        
+
         // ESC key to close modal
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.closeModal();
             }
         });
-        
+
         // Click outside modal to close
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal-overlay')) {
                 this.closeModal();
+                this.closeAnnouncementModal();
             }
         });
     }
-    
+
     async navigateToSection(section) {
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -107,6 +108,7 @@ class Dashboard {
             users: 'Driver Management',
             shops: 'Shop Management',
             categories: 'Category Management',
+            announcements: 'Announcements Management',
             logs: 'Admin Access Logs',
             'all-users': 'All Users'
         };
@@ -128,13 +130,15 @@ class Dashboard {
             if (grid) grid.scrollTop = 0;
         } else if (section === 'categories') {
             this.loadCategories();
+        } else if (section === 'announcements') {
+            loadAnnouncements(); // Use global function
         } else if (section === 'logs') {
             this.loadLogs();
         } else if (section === 'all-users') {
             this.renderUsers();
         }
     }
-    
+
     async loadAllData() {
         try {
             await Promise.all([
@@ -148,7 +152,226 @@ class Dashboard {
             this.showToast('Failed to load dashboard data', 'error');
         }
     }
-    
+
+    // New methods for modern UI functionality
+    addProject() {
+        console.log('Add project clicked');
+        // Placeholder for add project functionality
+        this.showToast('Add Project feature coming soon!', 'info');
+    }
+
+    importData() {
+        console.log('Import data clicked');
+        // Placeholder for import data functionality
+        this.showToast('Import Data feature coming soon!', 'info');
+    }
+
+    // Announcements functionality
+    openAnnouncementModal() {
+        console.log('openAnnouncementModal called'); // Debug log
+        const modal = document.getElementById('announcement-modal');
+        console.log('Modal element:', modal); // Debug log
+
+        if (modal) {
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // Reset form
+            const form = document.getElementById('announcement-form');
+            if (form) {
+                form.reset();
+            }
+            console.log('Modal opened successfully'); // Debug log
+        } else {
+            console.error('Modal element not found');
+        }
+    }
+
+    closeAnnouncementModal() {
+        const modal = document.getElementById('announcement-modal');
+        if (modal) {
+            modal.classList.remove('active');
+        }
+        document.body.style.overflow = 'auto';
+    }
+
+    async saveAnnouncement(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const formData = new FormData(form);
+        const message = formData.get('message').trim();
+        const importance = formData.get('importance');
+
+        if (!message || !importance) {
+            this.showToast('Please fill in all required fields', 'error');
+            return;
+        }
+
+        try {
+            // Show loading state
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+            submitBtn.disabled = true;
+
+            // Get existing announcements from localStorage
+            const existingAnnouncements = JSON.parse(localStorage.getItem('announcements') || '[]');
+
+            // Create new announcement
+            const newAnnouncement = {
+                id: Date.now(), // Simple ID generation
+                message: message,
+                importance: importance,
+                created_at: new Date().toISOString()
+            };
+
+            // Add to existing announcements
+            existingAnnouncements.unshift(newAnnouncement);
+
+            // Save back to localStorage
+            localStorage.setItem('announcements', JSON.stringify(existingAnnouncements));
+
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            this.showToast('Announcement created successfully!', 'success');
+            this.closeAnnouncementModal();
+            this.loadAnnouncements(); // Reload announcements
+        } catch (error) {
+            console.error('Error creating announcement:', error);
+            this.showToast('Failed to create announcement. Please try again.', 'error');
+        } finally {
+            // Reset button state
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    }
+
+    async loadAnnouncements() {
+        try {
+            // Load announcements from localStorage
+            let announcements = JSON.parse(localStorage.getItem('announcements') || '[]');
+
+            // If no announcements exist, create some sample data
+            if (announcements.length === 0) {
+                announcements = [
+                    {
+                        id: 1,
+                        message: 'System maintenance will be performed this weekend. Please expect brief service interruptions.',
+                        importance: 'high',
+                        created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() // 2 days ago
+                    },
+                    {
+                        id: 2,
+                        message: 'New features have been added to the platform. Check out the updated interface and improved functionality.',
+                        importance: 'medium',
+                        created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() // 1 day ago
+                    },
+                    {
+                        id: 3,
+                        message: 'Holiday schedule update: Customer support will have limited hours during the holiday season.',
+                        importance: 'low',
+                        created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() // 3 hours ago
+                    }
+                ];
+                localStorage.setItem('announcements', JSON.stringify(announcements));
+            }
+
+            this.renderAnnouncements(announcements);
+        } catch (error) {
+            console.error('Error loading announcements:', error);
+            this.renderAnnouncements([]); // Show empty state
+        }
+    }
+
+    renderAnnouncements(announcements) {
+        const grid = document.getElementById('announcements-grid');
+
+        if (!announcements || announcements.length === 0) {
+            grid.innerHTML = `
+                <div class="announcements-empty">
+                    <i class="fas fa-bullhorn"></i>
+                    <h3>No Announcements</h3>
+                    <p>No announcements have been created yet. Click "Add Announcement" to create your first one.</p>
+                </div>
+            `;
+            return;
+        }
+
+        grid.innerHTML = announcements.map((announcement, index) => {
+            const createdDate = new Date(announcement.created_at);
+            const formattedDate = createdDate.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+            const formattedTime = createdDate.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            return `
+                <div class="announcement-card ${announcement.importance}">
+                    <div class="announcement-header">
+                        <h3 class="announcement-title">Announcement #${announcement.id}</h3>
+                        <div class="announcement-actions">
+                            <button class="action-btn delete" onclick="dashboard.deleteAnnouncement(${announcement.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="announcement-content">
+                        <p class="announcement-message">${announcement.message}</p>
+                        <div class="announcement-meta">
+                            <span class="announcement-date">
+                                <i class="fas fa-calendar"></i>
+                                Made: ${formattedDate} ${formattedTime}
+                            </span>
+                            <span class="announcement-importance ${announcement.importance}">
+                                <i class="fas fa-${this.getImportanceIcon(announcement.importance)}"></i>
+                                ${announcement.importance.charAt(0).toUpperCase() + announcement.importance.slice(1)} Importance
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    getImportanceIcon(importance) {
+        switch (importance) {
+            case 'high': return 'exclamation-triangle';
+            case 'medium': return 'info-circle';
+            case 'low': return 'info';
+            default: return 'info';
+        }
+    }
+
+    async deleteAnnouncement(id) {
+        if (!confirm('Are you sure you want to delete this announcement?')) {
+            return;
+        }
+
+        try {
+            // Get existing announcements from localStorage
+            const existingAnnouncements = JSON.parse(localStorage.getItem('announcements') || '[]');
+
+            // Filter out the announcement to delete
+            const updatedAnnouncements = existingAnnouncements.filter(announcement => announcement.id !== id);
+
+            // Save back to localStorage
+            localStorage.setItem('announcements', JSON.stringify(updatedAnnouncements));
+
+            this.showToast('Announcement deleted successfully!', 'success');
+            this.loadAnnouncements(); // Reload announcements
+        } catch (error) {
+            console.error('Error deleting announcement:', error);
+            this.showToast('Failed to delete announcement. Please try again.', 'error');
+        }
+    }
+
     async loadUsers() {
         try {
             console.log('Loading users...');
@@ -171,7 +394,7 @@ class Dashboard {
             this.users = [];
         }
     }
-    
+
     async loadShops() {
         // First, load shop_accounts for dashboard stats
         try {
@@ -194,7 +417,7 @@ class Dashboard {
             console.error('Error loading shop accounts:', e);
             this.shops = [];
         }
-        
+
         const container = document.getElementById('shops-grid');
         if (!container) return;
         // Use the shops we already loaded instead of making another call
@@ -278,7 +501,7 @@ class Dashboard {
             container.appendChild(loadMoreBtn);
         }
     }
-    
+
     updateStats() {
         // Update overview stats - only count drivers from users table
         const driverCount = this.users.filter(u => u.user_type === 'driver').length;
@@ -298,7 +521,7 @@ class Dashboard {
 
         document.getElementById('today-registrations').textContent = todayDrivers + todayShops;
     }
-    
+
     renderRecentItems() {
         // Render recent drivers (only drivers from users table)
         const recentDrivers = this.users.filter(u => u.user_type === 'driver').slice(0, 5);
@@ -322,11 +545,11 @@ class Dashboard {
                 recentUsersContainer.innerHTML = recentUsersHtml;
             }
         }
-        
+
         // Render recent shops
         const recentShops = this.shops.slice(0, 5);
         const recentShopsContainer = document.getElementById('recent-shops-list');
-        
+
         if (recentShopsContainer) {
             if (recentShops.length === 0) {
                 recentShopsContainer.innerHTML = '<p class="empty-state">No recent shops</p>';
@@ -346,7 +569,7 @@ class Dashboard {
             }
         }
     }
-    
+
     renderUsers() {
         // Render all users in the All Users table - show both drivers and shops
         const tbody = document.getElementById('users-table-body');
@@ -404,21 +627,21 @@ class Dashboard {
             });
         });
     }
-    
+
     async renderShops() {
         const container = document.getElementById('shops-grid');
         if (!container) return;
-        
+
         // Use the shops already loaded in this.shops
         let partnerShops = Array.isArray(this.filteredShops) ? this.filteredShops : (this.shops || []);
-        
+
         // Make sure we have shops data
         if (!partnerShops || partnerShops.length === 0) {
             if (this.shops && this.shops.length > 0) {
                 partnerShops = this.shops;
             }
         }
-        
+
         console.log('Rendering shops:', partnerShops.length);
         if (partnerShops.length === 0) {
             container.innerHTML = `
@@ -499,7 +722,7 @@ class Dashboard {
             container.appendChild(loadMoreBtn);
         }
     }
-    
+
     renderDrivers() {
         let container = document.getElementById('drivers-grid');
         if (!container) {
@@ -573,16 +796,16 @@ class Dashboard {
             container.appendChild(loadMoreBtn);
         }
     }
-    
+
     // User Management
     openUserModal(userId = null) {
         const isEdit = userId !== null;
         const user = isEdit ? this.users.find(u => u.id === userId) : null;
-        
+
         // Create modal overlay
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
-        
+
         overlay.innerHTML = `
             <div class="modal">
                 <div class="modal-header">
@@ -597,21 +820,21 @@ class Dashboard {
                             <label for="user-email">Email</label>
                             <input type="email" id="user-email" value="${user?.email || ''}" required ${isEdit ? 'readonly' : ''}>
                         </div>
-                        
+
                         ${!isEdit ? `
                         <div class="form-group">
                             <label for="user-password">Password</label>
                             <input type="password" id="user-password" placeholder="Enter password" required minlength="6">
                         </div>
                         ` : ''}
-                        
+
                         <div class="form-group">
                             <label for="user-type">User Type</label>
                             <select id="user-type" ${isEdit ? 'disabled' : ''}>
                                 <option value="driver" ${user?.user_type === 'driver' ? 'selected' : ''}>Driver</option>
                             </select>
                         </div>
-                        
+
                         <div class="form-actions">
                             <button type="button" class="btn secondary" onclick="dashboard.closeModal()">Cancel</button>
                             <button type="submit" class="btn primary">
@@ -622,29 +845,29 @@ class Dashboard {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
-        
+
         // Show modal with animation
         requestAnimationFrame(() => {
             overlay.classList.add('active');
         });
-        
+
         // Handle form submission
         const form = overlay.querySelector('#user-form');
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const formData = {
                 email: document.getElementById('user-email').value,
                 user_type: document.getElementById('user-type').value
             };
-            
+
             if (!isEdit) {
                 formData.password = document.getElementById('user-password').value;
             }
-            
+
             if (isEdit) {
                 await this.updateUser(userId, formData);
             } else {
@@ -652,14 +875,14 @@ class Dashboard {
             }
         });
     }
-    
+
     changeUserPassword(userId) {
         const user = this.users.find(u => u.id === userId);
         if (!user) return;
-        
+
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
-        
+
         overlay.innerHTML = `
             <div class="modal">
                 <div class="modal-header">
@@ -672,12 +895,12 @@ class Dashboard {
                             <input type="password" id="new-password" placeholder="Enter new password" required minlength="6">
                             <small>Password must be at least 6 characters long</small>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="confirm-password">Confirm Password</label>
                             <input type="password" id="confirm-password" placeholder="Confirm new password" required>
                         </div>
-                        
+
                         <div class="form-actions">
                             <button type="button" class="btn secondary" onclick="dashboard.closeModal()">Cancel</button>
                             <button type="submit" class="btn primary">Update Password</button>
@@ -686,37 +909,37 @@ class Dashboard {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
-        
+
         // Show modal with animation
         requestAnimationFrame(() => {
             overlay.classList.add('active');
         });
-        
+
         // Handle form submission
         const form = overlay.querySelector('#password-form');
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const newPassword = document.getElementById('new-password').value;
             const confirmPassword = document.getElementById('confirm-password').value;
-            
+
             if (newPassword !== confirmPassword) {
                 this.showToast('Passwords do not match', 'error');
                 return;
             }
-            
+
             if (newPassword.length < 6) {
                 this.showToast('Password must be at least 6 characters long', 'error');
                 return;
             }
-            
+
             await this.updateUserPassword(userId, newPassword);
         });
     }
-    
+
     async createUser(formData) {
         try {
             const response = await fetch('/api/admin/users', {
@@ -724,9 +947,9 @@ class Dashboard {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast('Driver created successfully!', 'success');
                 this.closeModal();
@@ -741,7 +964,7 @@ class Dashboard {
             this.showToast(error.message || 'Failed to create driver', 'error');
         }
     }
-    
+
     async updateUser(userId, formData) {
         try {
             const response = await fetch(`/api/admin/users/${userId}`, {
@@ -749,9 +972,9 @@ class Dashboard {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast('Driver updated successfully!', 'success');
                 this.closeModal();
@@ -766,7 +989,7 @@ class Dashboard {
             this.showToast(error.message || 'Failed to update driver', 'error');
         }
     }
-    
+
     async updateUserPassword(userId, newPassword) {
         try {
             const response = await fetch(`/api/admin/users/${userId}/password`, {
@@ -774,9 +997,9 @@ class Dashboard {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: newPassword })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast('Driver password updated successfully!', 'success');
                 this.closeModal();
@@ -788,7 +1011,7 @@ class Dashboard {
             this.showToast(error.message || 'Failed to update password', 'error');
         }
     }
-    
+
     // Shop Management
     async openShopModal(shopOrId = null) {
         try {
@@ -812,11 +1035,11 @@ class Dashboard {
             }
         // Generate a unique ID suffix for all form fields
         const uniqueId = Date.now();
-        
+
             // Create modal overlay (following the same pattern as working modals)
             const overlay = document.createElement('div');
             overlay.className = 'modal-overlay';
-            
+
             overlay.innerHTML = `
                 <div class="modal">
                     <div class="modal-header" style="background:rgba(255,107,53,0.06); display:flex; align-items:center; justify-content:space-between; padding-bottom:12px; border-radius:12px 12px 0 0;">
@@ -837,7 +1060,7 @@ class Dashboard {
                                     <label for="shop-name-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-store" style="color:var(--primary-color);"></i> Shop Name
                             </label>
-                            <input type="text" id="shop-name-${uniqueId}" required 
+                            <input type="text" id="shop-name-${uniqueId}" required
                                    value="${shop ? shop.shop_name : ''}"
                                            placeholder="Enter shop name"
                                            style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:2px; transition:box-shadow 0.2s;">
@@ -846,7 +1069,7 @@ class Dashboard {
                                     <label for="shop-email-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-envelope" style="color:var(--primary-color);"></i> Email Address
                             </label>
-                            <input type="email" id="shop-email-${uniqueId}" required 
+                            <input type="email" id="shop-email-${uniqueId}" required
                                    value="${shop ? shop.email : ''}"
                                    ${isEdit ? 'readonly' : ''}
                                            placeholder="Enter email address"
@@ -857,7 +1080,7 @@ class Dashboard {
                                     <label for="shop-password-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-lock" style="color:var(--primary-color);"></i> Password
                             </label>
-                            <input type="password" id="shop-password-${uniqueId}" required 
+                            <input type="password" id="shop-password-${uniqueId}" required
                                            placeholder="Enter password"
                                            style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:2px; transition:box-shadow 0.2s;">
                                     <small style="color:#94a3b8;">Password must be at least 6 characters long</small>
@@ -870,7 +1093,7 @@ class Dashboard {
                                     <label for="contact-person-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-user" style="color:var(--primary-color);"></i> Contact Person
                             </label>
-                            <input type="text" id="contact-person-${uniqueId}" 
+                            <input type="text" id="contact-person-${uniqueId}"
                                    value="${shop ? shop.contact_person || '' : ''}"
                                            placeholder="Enter contact person name"
                                            style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:2px; transition:box-shadow 0.2s;">
@@ -879,7 +1102,7 @@ class Dashboard {
                                     <label for="shop-phone-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-phone" style="color:var(--primary-color);"></i> Phone Number
                             </label>
-                            <input type="tel" id="shop-phone-${uniqueId}" 
+                            <input type="tel" id="shop-phone-${uniqueId}"
                                    value="${shop ? shop.phone || '' : ''}"
                                            placeholder="Enter phone number"
                                            style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:2px; transition:box-shadow 0.2s;">
@@ -898,7 +1121,7 @@ class Dashboard {
                                     <label for="shop-afm-${uniqueId}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
                                         <i class="fas fa-id-card" style="color:var(--primary-color);"></i> AFM (Tax ID)
                             </label>
-                                    <input type="text" id="shop-afm-${uniqueId}" required 
+                                    <input type="text" id="shop-afm-${uniqueId}" required
                                            value="${shop ? shop.afm || '' : ''}"
                                            placeholder="Enter AFM (Tax ID)"
                                            style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:2px; transition:box-shadow 0.2s;">
@@ -943,17 +1166,17 @@ class Dashboard {
                 </div>
             </div>
         `;
-        
+
             document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
             overlay.dataset.uniqueId = uniqueId;
             console.log('Modal overlay created and appended to body');
-        
+
             // Show modal with animation (same as working modals)
             requestAnimationFrame(() => {
                 overlay.classList.add('active');
             });
-            
+
             const form = overlay.querySelector(`#shop-form-${uniqueId}`);
             if (form) {
                 form.addEventListener('submit', (e) => {
@@ -974,28 +1197,28 @@ class Dashboard {
             this.showToast('Error opening shop modal: ' + error.message, 'error');
         }
     }
-    
+
     changeShopPassword(shopId) {
         console.log('Opening password change modal for shop ID:', shopId);
-        
+
         // Convert to same type for comparison (both to strings)
         const shopIdStr = String(shopId);
         const shop = this.shops.find(s => String(s.id) === shopIdStr);
-        
+
         if (!shop) {
             console.error('Shop not found with ID:', shopId);
             console.log('Available shop IDs:', this.shops.map(s => s.id));
             this.showToast('Shop not found', 'error');
             return;
         }
-        
+
         // Generate a unique ID for the password modal
         const uniqueId = Date.now();
         console.log('Generated unique ID for shop password modal:', uniqueId);
-        
+
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
-        
+
         overlay.innerHTML = `
             <div class="modal">
                 <div class="modal-header">
@@ -1008,12 +1231,12 @@ class Dashboard {
                             <input type="password" id="new-password-${uniqueId}" placeholder="Enter new password" required minlength="6">
                             <small>Password must be at least 6 characters long</small>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="confirm-password-${uniqueId}">Confirm Password</label>
                             <input type="password" id="confirm-password-${uniqueId}" placeholder="Confirm new password" required>
                         </div>
-                        
+
                         <div class="form-actions">
                             <button type="button" class="btn secondary" onclick="dashboard.closeModal()">Cancel</button>
                             <button type="submit" class="btn primary">Update Password</button>
@@ -1022,40 +1245,40 @@ class Dashboard {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
-        
+
         // Show modal with animation
         requestAnimationFrame(() => {
             overlay.classList.add('active');
         });
-        
+
         // Handle form submission
         const form = overlay.querySelector(`#password-form-${uniqueId}`);
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             console.log('Shop password form submitted for shop ID:', shopId);
-            
+
             const newPassword = document.getElementById(`new-password-${uniqueId}`).value;
             const confirmPassword = document.getElementById(`confirm-password-${uniqueId}`).value;
-            
+
             if (newPassword !== confirmPassword) {
                 this.showToast('Passwords do not match', 'error');
                 return;
             }
-            
+
             if (newPassword.length < 6) {
                 this.showToast('Password must be at least 6 characters long', 'error');
                 return;
             }
-            
+
             // Show loading state on button
             const submitButton = form.querySelector('button[type="submit"]');
             const originalButtonText = submitButton.innerHTML;
             submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
             submitButton.disabled = true;
-            
+
             try {
                 await this.updateShopPassword(shopId, newPassword);
             } catch (error) {
@@ -1065,7 +1288,7 @@ class Dashboard {
             }
         });
     }
-    
+
     async createShop(uniqueId) {
         try {
             // Get form data
@@ -1129,7 +1352,7 @@ class Dashboard {
             this.showToast(error.message || 'Failed to create shop', 'error');
         }
     }
-    
+
     async updateShop(shopId, uniqueId) {
         try {
             const formData = {
@@ -1160,37 +1383,37 @@ class Dashboard {
             this.showToast(error.message || 'Failed to update shop', 'error');
         }
     }
-    
+
     async updateShopPassword(shopId, newPassword) {
         try {
             console.log('Updating password for shop ID:', shopId);
-            
+
             if (!shopId) {
                 throw new Error('Shop ID is required');
             }
-            
+
             if (!newPassword || newPassword.length < 6) {
                 throw new Error('Password must be at least 6 characters long');
             }
-            
+
             // Make sure shopId is a string
             const id = String(shopId);
             console.log('Sending API request to update password for shop ID:', id);
-            
+
             const response = await fetch(`/api/admin/shop-accounts/${id}/password`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: newPassword })
             });
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('Server response error:', response.status, errorText);
                 throw new Error(`Server error (${response.status}): ${errorText}`);
             }
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 console.log('Shop password updated successfully for ID:', id);
                 this.showToast('Shop password updated successfully!', 'success');
@@ -1204,7 +1427,7 @@ class Dashboard {
             throw error; // Re-throw to allow the caller to handle it
         }
     }
-    
+
     async deleteUser(userId) {
         if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
             return;
@@ -1244,23 +1467,23 @@ class Dashboard {
             this.showToast(error.message || 'Failed to delete user', 'error');
         }
     }
-    
+
     async deleteShop(shopId) {
         if (!confirm('Are you sure you want to delete this shop? This action cannot be undone.')) {
             return;
         }
-        
+
         try {
             console.log('Deleting shop with ID:', shopId);
             // Convert to string for logging and clarity
             const shopIdStr = String(shopId);
-            
+
             const response = await fetch(`/api/admin/shop-accounts/${shopIdStr}`, {
                 method: 'DELETE'
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast('Shop deleted successfully!', 'success');
                 await this.loadShops();
@@ -1274,13 +1497,13 @@ class Dashboard {
             this.showToast(error.message || 'Failed to delete shop', 'error');
         }
     }
-    
+
     // Utility methods
     editUser(userId) {
         if (document.querySelector('.modal-overlay.active')) return; // Prevent double modal
         this.openUserModal(userId);
     }
-    
+
     editShop(shopId) {
         console.log('Editing shop with ID:', shopId);
         // Make sure shopId is a valid value before opening modal
@@ -1411,18 +1634,18 @@ class Dashboard {
             this.showToast(error.message || 'Failed to delete shop', 'error');
         }
     }
-    
+
     filterUsers(searchTerm = '', userType = 'all') {
         console.log('Filtering users:', searchTerm, userType);
         // TODO: Implement user filtering
     }
-    
+
     async refreshData() {
         console.log('Refreshing data from database...');
         await this.loadAllData();
         this.showToast('Data refreshed successfully!', 'success');
     }
-    
+
     closeModal() {
         // Remove all modal overlays
         const overlays = document.querySelectorAll('.modal-overlay');
@@ -1435,7 +1658,7 @@ class Dashboard {
                 }
             }, 300);
         });
-        
+
         // Also remove any standalone modals
         const modals = document.querySelectorAll('.modal');
         modals.forEach(modal => {
@@ -1443,14 +1666,14 @@ class Dashboard {
                 modal.parentNode.removeChild(modal);
             }
         });
-        
+
         // Reset body overflow
         document.body.style.overflow = 'auto';
-        
+
         // Remove modal-open class if it exists
         document.body.classList.remove('modal-open');
     }
-    
+
     showToast(message, type = 'success') {
         const container = document.getElementById('toast-container');
         if (!container) return;
@@ -1464,7 +1687,7 @@ class Dashboard {
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        
+
         toast.innerHTML = `
             <div class="toast-icon">
                 <i class="fas ${icons[type]}"></i>
@@ -1483,22 +1706,22 @@ class Dashboard {
             }
         }, 4000);
     }
-    
+
     timeAgo(date) {
         const now = new Date();
         const diffInMs = now - date;
         const diffInMins = Math.floor(diffInMs / (1000 * 60));
         const diffInHours = Math.floor(diffInMins / 60);
         const diffInDays = Math.floor(diffInHours / 24);
-        
+
         if (diffInMins < 1) return 'Just now';
         if (diffInMins < 60) return `${diffInMins}m ago`;
         if (diffInHours < 24) return `${diffInHours}h ago`;
         if (diffInDays < 7) return `${diffInDays}d ago`;
-        
+
         return date.toLocaleDateString();
     }
-    
+
     formatDate(dateString) {
         const date = new Date(dateString);
         return date.toLocaleDateString('en-US', {
@@ -1507,7 +1730,7 @@ class Dashboard {
             day: 'numeric'
         });
     }
-    
+
     setupShopFilter() {
         const shopFilter = document.getElementById('shop-filter');
         if (shopFilter) {
@@ -1518,7 +1741,7 @@ class Dashboard {
         }
         this.applyShopFilter();
     }
-    
+
     applyShopFilter() {
         if (this.shopFilter === 'all') {
             this.filteredShops = this.shops;
@@ -1529,7 +1752,7 @@ class Dashboard {
         this.shopsToShow = 4;
         this.renderShops();
     }
-    
+
     setupDriverSection() {
         // Add All Users nav if not present
         let nav = document.querySelector('.nav-list');
@@ -1689,7 +1912,7 @@ class Dashboard {
                 // Find shops where this driver is associated
                 userShops = this.shops.filter(shop => {
                     // Check if driver is associated with this shop
-                    return shop.contact_person === driver.name || 
+                    return shop.contact_person === driver.name ||
                            shop.email === driver.email ||
                            String(shop.user_id) === String(driver.id);
                 });
@@ -1815,10 +2038,10 @@ class Dashboard {
         const modal = document.getElementById(modalId);
         modal.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
         modal.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-        
+
         // Add active class to clicked tab
         event.target.classList.add('active');
-        
+
         // Show corresponding content
         const content = modal.querySelector(`[data-tab-content="${tabName}"]`);
         if (content) content.classList.add('active');
@@ -1850,7 +2073,7 @@ class Dashboard {
                         <div style="font-size: 12px; color: #15803d; text-transform: uppercase; letter-spacing: 0.5px;">Total Earnings</div>
                     </div>
                 </div>
-                
+
                 <div style="background: #f8fafc; border-radius: 12px; padding: 20px;">
                     <h4 style="margin: 0 0 16px; color: #374151; display: flex; align-items: center; gap: 8px;">
                         <i class="fas fa-user-circle" style="color: var(--primary-color);"></i>
@@ -1950,7 +2173,7 @@ class Dashboard {
                             <i class="fas fa-store" style="color: var(--primary-color);"></i>
                             Recent Shops
                         </h4>
-                        ${details.recentShops && details.recentShops.length > 0 ? 
+                        ${details.recentShops && details.recentShops.length > 0 ?
                             details.recentShops.map(shop => `
                                 <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px; background: white; border-radius: 8px; margin-bottom: 8px;">
                                     <div>
@@ -1969,7 +2192,7 @@ class Dashboard {
                             <i class="fas fa-shopping-bag" style="color: var(--primary-color);"></i>
                             Recent Orders
                         </h4>
-                        ${details.recentOrders && details.recentOrders.length > 0 ? 
+                        ${details.recentOrders && details.recentOrders.length > 0 ?
                             details.recentOrders.map(order => `
                                 <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px; background: white; border-radius: 8px; margin-bottom: 8px;">
                                     <div>
@@ -1992,7 +2215,7 @@ class Dashboard {
 
     renderDriverFinancialTab(driver, stats, details) {
         const avgOrderValue = stats.totalOrders > 0 ? (stats.totalEarnings / stats.totalOrders) : 0;
-        
+
         return `
             <div class="tab-content" data-tab-content="financial">
                 <div style="display: grid; gap: 24px;">
@@ -2091,9 +2314,9 @@ class Dashboard {
         try {
             console.log('Fetching from: /api/admin/categories');
             const response = await fetch('/api/admin/categories');
-            
+
             console.log('Response status:', response.status, response.statusText);
-            
+
             if (response.ok) {
                 const result = await response.json();
                 console.log('Categories loaded successfully:', result);
@@ -2128,7 +2351,7 @@ class Dashboard {
                 <div class="category-status ${category.is_active ? 'active' : 'inactive'}">
                     ${category.is_active ? 'Active' : 'Inactive'}
                 </div>
-                
+
                 <div class="category-header">
                     <div class="category-icon" style="background: ${category.color}">
                         <i class="${category.icon}"></i>
@@ -2138,7 +2361,7 @@ class Dashboard {
                         <p>${category.description || 'No description'}</p>
                     </div>
                 </div>
-                
+
                 <div class="category-stats">
                     <div class="category-stat">
                         <span class="stat-number">${category.shop_count || 0}</span>
@@ -2149,7 +2372,7 @@ class Dashboard {
                         <span class="stat-label">Orders</span>
                     </div>
                 </div>
-                
+
                 <div class="category-actions">
                     <button class="category-action-btn edit" onclick="dashboard.editCategory(${category.id})">
                         <i class="fas fa-edit"></i>
@@ -2188,7 +2411,7 @@ class Dashboard {
         modal.id = 'category-modal';
 
         const defaultColors = [
-            '#ff6b35', '#e74c3c', '#f39c12', '#e67e22', 
+            '#ff6b35', '#e74c3c', '#f39c12', '#e67e22',
             '#27ae60', '#2ecc71', '#3498db', '#2980b9',
             '#9b59b6', '#8e44ad', '#e91e63', '#8b4513'
         ];
@@ -2207,7 +2430,7 @@ class Dashboard {
                         <i class="fas fa-th-large" style="color: var(--primary-color); margin-right: 8px;"></i>
                         ${isEdit ? 'Edit Category' : 'Add New Category'}
                     </h3>
-                    
+
                     <button class="modal-close-x" style="
                         position: absolute;
                         top: 16px;
@@ -2227,44 +2450,44 @@ class Dashboard {
                         z-index: 1;
                     " title="Close">×</button>
                 </div>
-                
+
                 <form class="category-form" id="category-form">
                     <div class="form-group">
                         <label for="category-name">Category Name *</label>
-                        <input type="text" id="category-name" name="name" required 
+                        <input type="text" id="category-name" name="name" required
                                value="${isEdit ? editCategory.name : ''}"
                                placeholder="e.g. Pizza, Burgers, Chinese">
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="category-description">Description</label>
                         <textarea id="category-description" name="description" rows="3"
                                   placeholder="Brief description of this category">${isEdit ? (editCategory.description || '') : ''}</textarea>
                     </div>
-                    
+
                     <div class="form-group">
                         <label>Color</label>
                         <div class="color-picker-grid">
                             ${defaultColors.map(color => `
-                                <div class="color-option ${isEdit && editCategory.color === color ? 'selected' : (!isEdit && color === '#ff6b35' ? 'selected' : '')}" 
-                                     style="background: ${color}" 
+                                <div class="color-option ${isEdit && editCategory.color === color ? 'selected' : (!isEdit && color === '#ff6b35' ? 'selected' : '')}"
+                                     style="background: ${color}"
                                      data-color="${color}"></div>
                             `).join('')}
                         </div>
                     </div>
-                    
+
                     <div class="form-group">
                         <label>Icon</label>
                         <div class="icon-picker-grid">
                             ${defaultIcons.map(icon => `
-                                <div class="icon-option ${isEdit && editCategory.icon === icon ? 'selected' : (!isEdit && icon === 'fas fa-utensils' ? 'selected' : '')}" 
+                                <div class="icon-option ${isEdit && editCategory.icon === icon ? 'selected' : (!isEdit && icon === 'fas fa-utensils' ? 'selected' : '')}"
                                      data-icon="${icon}">
                                     <i class="${icon}"></i>
                                 </div>
                             `).join('')}
                         </div>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="category-status">Status</label>
                         <select id="category-status" name="is_active" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 14px;">
@@ -2275,7 +2498,7 @@ class Dashboard {
                             Inactive categories won't be available for selection when creating shops
                         </small>
                     </div>
-                    
+
                     <div class="form-group" style="display: flex; gap: 12px; margin-top: 24px;">
                         <button type="button" class="btn secondary modal-close" style="flex: 1;">
                             Cancel
@@ -2504,7 +2727,7 @@ class Dashboard {
                 document.body.style.overflow = 'auto';
                 resolve(false);
             });
-            
+
             confirmBtn.addEventListener('click', () => {
                 modal.remove();
                 document.body.style.overflow = 'auto';
@@ -2531,10 +2754,10 @@ class Dashboard {
             this.allLogs = [];
             this.filteredLogs = [];
             this.setupLogsFilters();
-            
+
             // Load real logs from database
             await this.loadLogsFromDatabase();
-            
+
             this.updateLogsStats();
             this.renderLogs();
             this.showReadOnlyWarning();
@@ -2595,20 +2818,20 @@ class Dashboard {
         if (!ip || ip === 'unknown' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('127.')) {
             return 'Local Network';
         }
-        
+
         // Avoid CORS issues by not making external API calls
         // Return a simplified location based on IP patterns
         try {
             // Basic IP geolocation without external API calls
             if (ip.startsWith('85.')) return 'Europe';
-            if (ip.startsWith('46.')) return 'Europe'; 
+            if (ip.startsWith('46.')) return 'Europe';
             if (ip.startsWith('217.')) return 'Europe';
             if (ip.startsWith('31.')) return 'Europe';
             if (ip.startsWith('176.')) return 'Europe';
             if (ip.startsWith('8.8.')) return 'Google DNS';
             if (ip.startsWith('1.1.')) return 'Cloudflare DNS';
             if (ip.startsWith('208.67.')) return 'OpenDNS';
-            
+
             // For other IPs, just return a general location
             return 'External Location';
         } catch (error) {
@@ -2619,11 +2842,11 @@ class Dashboard {
     setupLogsFilters() {
         const searchInput = document.getElementById('logs-search');
         const filterSelect = document.getElementById('logs-filter');
-        
+
         if (searchInput) {
             searchInput.addEventListener('input', () => this.applyLogsFilter());
         }
-        
+
         if (filterSelect) {
             filterSelect.addEventListener('change', () => this.applyLogsFilter());
         }
@@ -2632,15 +2855,15 @@ class Dashboard {
     applyLogsFilter() {
         const searchTerm = document.getElementById('logs-search')?.value.toLowerCase() || '';
         const filterType = document.getElementById('logs-filter')?.value || 'all';
-        
+
         this.filteredLogs = this.allLogs.filter(log => {
             // Search filter
-            const matchesSearch = !searchTerm || 
+            const matchesSearch = !searchTerm ||
                 log.username.toLowerCase().includes(searchTerm) ||
                 log.ip_address.toLowerCase().includes(searchTerm) ||
                 (log.location && log.location.toLowerCase().includes(searchTerm)) ||
                 (log.failure_reason && log.failure_reason.toLowerCase().includes(searchTerm));
-            
+
             // Type filter
             let matchesType = true;
             if (filterType === 'success') {
@@ -2655,10 +2878,10 @@ class Dashboard {
                 weekAgo.setDate(weekAgo.getDate() - 7);
                 matchesType = new Date(log.created_at) >= weekAgo;
             }
-            
+
             return matchesSearch && matchesType;
         });
-        
+
         this.currentPage = 1;
         this.renderLogs();
     }
@@ -2667,13 +2890,13 @@ class Dashboard {
         const successfulLogins = this.allLogs.filter(log => log.login_successful).length;
         const failedLogins = this.allLogs.filter(log => !log.login_successful).length;
         const uniqueIps = new Set(this.allLogs.map(log => log.ip_address)).size;
-        
+
         // Get last successful login
         const lastSuccessfulLogin = this.allLogs.find(log => log.login_successful);
-        const lastLoginTime = lastSuccessfulLogin 
+        const lastLoginTime = lastSuccessfulLogin
             ? this.timeAgo(new Date(lastSuccessfulLogin.created_at))
             : 'Never';
-        
+
         document.getElementById('successful-logins').textContent = successfulLogins;
         document.getElementById('failed-logins').textContent = failedLogins;
         document.getElementById('last-login-time').textContent = lastLoginTime;
@@ -2683,11 +2906,11 @@ class Dashboard {
     renderLogs() {
         const tbody = document.getElementById('logs-table-body');
         if (!tbody) return;
-        
+
         const startIndex = (this.currentPage - 1) * this.logsPerPage;
         const endIndex = startIndex + this.logsPerPage;
         const logsToShow = this.filteredLogs.slice(startIndex, endIndex);
-        
+
         if (logsToShow.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -2718,7 +2941,7 @@ class Dashboard {
                 </tr>
             `).join('');
         }
-        
+
         this.updateLogsPagination();
     }
 
@@ -2729,25 +2952,25 @@ class Dashboard {
 
     getBrowserFromUserAgent(userAgent) {
         if (!userAgent) return 'Unknown';
-        
+
         if (userAgent.includes('Chrome')) return 'Chrome';
         if (userAgent.includes('Firefox')) return 'Firefox';
         if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
         if (userAgent.includes('Edge')) return 'Edge';
         if (userAgent.includes('Opera')) return 'Opera';
-        
+
         return 'Other';
     }
 
     updateLogsPagination() {
         const totalPages = Math.ceil(this.filteredLogs.length / this.logsPerPage);
-        
+
         document.getElementById('current-page').textContent = this.currentPage;
         document.getElementById('total-pages').textContent = totalPages;
-        
+
         const prevBtn = document.getElementById('logs-prev-btn');
         const nextBtn = document.getElementById('logs-next-btn');
-        
+
         if (prevBtn) prevBtn.disabled = this.currentPage <= 1;
         if (nextBtn) nextBtn.disabled = this.currentPage >= totalPages;
     }
@@ -2755,7 +2978,7 @@ class Dashboard {
     changePage(direction) {
         const totalPages = Math.ceil(this.filteredLogs.length / this.logsPerPage);
         const newPage = this.currentPage + direction;
-        
+
         if (newPage >= 1 && newPage <= totalPages) {
             this.currentPage = newPage;
             this.renderLogs();
@@ -2772,7 +2995,7 @@ class Dashboard {
             const csvContent = this.generateLogsCSV();
             const blob = new Blob([csvContent], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
-            
+
             const a = document.createElement('a');
             a.href = url;
             a.download = `admin-logs-${new Date().toISOString().split('T')[0]}.csv`;
@@ -2780,7 +3003,7 @@ class Dashboard {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
-            
+
             this.showToast('Logs exported successfully', 'success');
         } catch (error) {
             console.error('Error exporting logs:', error);
@@ -2799,11 +3022,11 @@ class Dashboard {
             log.user_agent,
             log.failure_reason || 'Successful login'
         ]);
-        
+
         const csvContent = [headers, ...rows]
             .map(row => row.map(field => `"${field}"`).join(','))
             .join('\n');
-        
+
         return csvContent;
     }
 
@@ -2845,7 +3068,7 @@ class Dashboard {
                 <i class="fas fa-shield-alt"></i>
                 <span>These logs are read-only for security purposes. They cannot be modified or deleted from the dashboard.</span>
             `;
-            
+
             const header = logsSection.querySelector('.section-header');
             if (header) {
                 header.insertAdjacentElement('afterend', warning);
@@ -2859,71 +3082,71 @@ class Dashboard {
             console.log('Session management already active');
             return;
         }
-        
+
         console.log('Initializing session management...');
         this.sessionManagementActive = true;
         this.sessionStartTime = Date.now();
-        
+
         // Check session validity every minute
         this.sessionCheckInterval = setInterval(() => {
             this.checkSessionValidity();
         }, 60000); // Check every minute
-        
+
         // Set up automatic logout after 15 minutes
         this.resetActivityTimeout();
-        
+
         // Track user activity to reset timeout
         this.bindActivityEvents();
-        
+
         // Handle page visibility changes (close/refresh detection)
         this.bindVisibilityEvents();
-        
+
         console.log('Session management initialized successfully');
     }
-    
+
     bindActivityEvents() {
         // Only bind if not already bound
         if (this.activityEventsBound) {
             return;
         }
-        
+
         // Reset timeout on any user activity
         const resetTimeout = () => {
             if (this.sessionManagementActive) {
                 this.resetActivityTimeout();
             }
         };
-        
+
         // Track various user activities
         document.addEventListener('mousedown', resetTimeout);
         document.addEventListener('mousemove', resetTimeout);
         document.addEventListener('keypress', resetTimeout);
         document.addEventListener('scroll', resetTimeout);
         document.addEventListener('click', resetTimeout);
-        
+
         this.activityEventsBound = true;
     }
-    
+
     resetActivityTimeout() {
         // Only reset if session management is active
         if (!this.sessionManagementActive) {
             return;
         }
-        
+
         // Clear existing timeout
         if (this.activityTimeout) {
             clearTimeout(this.activityTimeout);
         }
-        
+
         // Update localStorage session expiry
         localStorage.setItem('admin_session_expiry', (Date.now() + this.sessionTimeout).toString());
-        
+
         // Set new timeout for 15 minutes
         this.activityTimeout = setTimeout(() => {
             this.logoutUser('Session timeout - 15 minutes of inactivity');
         }, this.sessionTimeout);
     }
-    
+
     bindVisibilityEvents() {
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
@@ -2935,52 +3158,52 @@ class Dashboard {
                 this.handlePageVisible();
             }
         });
-        
+
         // Handle beforeunload (close/refresh)
         window.addEventListener('beforeunload', (e) => {
             this.handleBeforeUnload(e);
         });
-        
+
         // Handle actual unload
         window.addEventListener('unload', () => {
             this.handlePageUnload();
         });
     }
-    
+
     handlePageHidden() {
         // Don't logout on tab switch or minimize
         // Only logout on actual close (handled in beforeunload)
         console.log('Page hidden');
     }
-    
+
     handlePageVisible() {
         // Only handle if session management is active
         if (!this.sessionManagementActive) {
             return;
         }
-        
+
         // Check if session is still valid when page becomes visible
         this.checkSessionValidity();
         this.resetActivityTimeout();
     }
-    
+
     handleBeforeUnload(e) {
         // Only handle if session management is active
         if (!this.sessionManagementActive) {
             return;
         }
-        
+
         // Detect if this is a refresh or actual close
         const isRefresh = e.clientX === 0 && e.clientY === 0;
         const isClose = !isRefresh;
-        
+
         if (isClose) {
             // User is closing the tab/window
             this.isClosing = true;
             this.logoutUser('User closed the browser/tab');
         }
     }
-    
+
     handlePageUnload() {
         // Final cleanup on page unload
         if (this.sessionCheckInterval) {
@@ -2990,50 +3213,50 @@ class Dashboard {
             clearTimeout(this.activityTimeout);
         }
     }
-    
+
     checkSessionValidity() {
         // Don't check if session management isn't active
         if (!this.sessionManagementActive || !this.sessionStartTime) {
             return;
         }
-        
+
         // Check if session token exists
         const sessionToken = localStorage.getItem('admin_session_token');
         const sessionExpiry = localStorage.getItem('admin_session_expiry');
-        
+
         if (!sessionToken || !sessionExpiry) {
             console.log('No session tokens found, session management stopping');
             this.stopSessionManagement();
             return;
         }
-        
+
         // Check if session is expired based on localStorage expiry
         if (Date.now() > parseInt(sessionExpiry)) {
             this.logoutUser('Session token expired');
             return;
         }
-        
+
         // Check absolute session time (15 minutes from start)
         const currentTime = Date.now();
         const sessionAge = currentTime - this.sessionStartTime;
-        
+
         if (sessionAge >= this.sessionTimeout) {
             this.logoutUser('Session expired - 15 minutes elapsed');
             return;
         }
-        
+
         console.log(`Session valid. Age: ${Math.floor(sessionAge / 1000)}s / ${Math.floor(this.sessionTimeout / 1000)}s`);
     }
-    
+
     stopSessionManagement() {
         if (!this.sessionManagementActive) {
             return;
         }
-        
+
         console.log('Stopping session management...');
         this.sessionManagementActive = false;
         this.sessionStartTime = null;
-        
+
         // Clear intervals and timeouts
         if (this.sessionCheckInterval) {
             clearInterval(this.sessionCheckInterval);
@@ -3043,47 +3266,47 @@ class Dashboard {
             clearTimeout(this.activityTimeout);
             this.activityTimeout = null;
         }
-        
+
         console.log('Session management stopped');
     }
 
     logoutUser(reason) {
         console.log('Logging out user:', reason);
-        
+
         // Stop session management
         this.stopSessionManagement();
-        
+
         // Clear all session data
         localStorage.removeItem('admin_session_token');
         localStorage.removeItem('admin_session_expiry');
         localStorage.removeItem('admin_username');
-        
+
         // Log the logout event
         this.logAdminActivity('logout', reason);
-        
+
         // Show logout message
         this.showToast('Session expired. Please login again.', 'error');
-        
+
         // Redirect to login after short delay
         setTimeout(() => {
             window.location.href = '/dashboard/';
         }, 2000);
     }
-    
+
     async logAdminActivity(action, details) {
         try {
             // Log admin activity if Supabase is configured
             if (isSupabaseConfigured && supabase) {
                 const username = localStorage.getItem('admin_username') || 'Unknown';
                 const sessionToken = localStorage.getItem('admin_session_token');
-                
+
                 // Get client info
                 const clientInfo = {
                     userAgent: navigator.userAgent,
                     ip: await this.getClientIP(),
                     timestamp: new Date().toISOString()
                 };
-                
+
                 // Call the logging function
                 await supabase.rpc('log_admin_activity', {
                     p_admin_id: null, // Would need actual admin ID
@@ -3100,7 +3323,7 @@ class Dashboard {
             console.error('Error logging admin activity:', error);
         }
     }
-    
+
     async getClientIP() {
         try {
             const response = await fetch('https://api.ipify.org?format=json');
@@ -3110,23 +3333,23 @@ class Dashboard {
             return 'unknown';
         }
     }
-    
+
     // Check if user is authenticated
     isAuthenticated() {
         const sessionToken = localStorage.getItem('admin_session_token');
         const sessionExpiry = localStorage.getItem('admin_session_expiry');
-        
+
         if (!sessionToken || !sessionExpiry) {
             return false;
         }
-        
+
         if (Date.now() > parseInt(sessionExpiry)) {
             return false;
         }
-        
+
         return true;
     }
-    
+
     // Refresh session on activity
     refreshSession() {
         if (this.isAuthenticated()) {
@@ -3179,11 +3402,298 @@ class Dashboard {
     }
 }
 
+// Global functions for modal operations
+function openAnnouncementModal() {
+    console.log('Global openAnnouncementModal called');
+    const modal = document.getElementById('announcement-modal');
+    if (modal) {
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        // Reset form
+        const form = document.getElementById('announcement-form');
+        if (form) {
+            form.reset();
+        }
+        console.log('Modal opened successfully');
+    } else {
+        console.error('Modal element not found');
+        alert('Modal not found. Please refresh the page.');
+    }
+}
+
+function closeAnnouncementModal() {
+    const modal = document.getElementById('announcement-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
+}
+
+function saveAnnouncement(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const formData = new FormData(form);
+    const message = formData.get('message').trim();
+    const importance = formData.get('importance');
+
+    if (!message || !importance) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    try {
+        // Show loading state
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        submitBtn.disabled = true;
+
+        // Get existing announcements from localStorage
+        const existingAnnouncements = JSON.parse(localStorage.getItem('announcements') || '[]');
+
+        // Create new announcement
+        const newAnnouncement = {
+            id: Date.now(), // Simple ID generation
+            message,
+            importance,
+            created_at: new Date().toISOString()
+        };
+
+        // Add to existing announcements (newest first)
+        existingAnnouncements.unshift(newAnnouncement);
+
+        // Save back to localStorage
+        localStorage.setItem('announcements', JSON.stringify(existingAnnouncements));
+        // Touch an auxiliary key to trigger storage events reliably
+        localStorage.setItem('announcements_updated_at', String(Date.now()));
+
+        // Broadcast to other tabs/windows (shop app)
+        try {
+            if (window.BroadcastChannel) {
+                const bc = new BroadcastChannel('announcements');
+                bc.postMessage({ type: 'updated' });
+                bc.close();
+            }
+        } catch (e) {
+            console.warn('BroadcastChannel not available', e);
+        }
+
+        // Simulate API delay
+        setTimeout(() => {
+            alert('Announcement created successfully!');
+            closeAnnouncementModal();
+            loadAnnouncements(); // Reload announcements
+
+            // Reset button state
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }, 300);
+    } catch (error) {
+        console.error('Error creating announcement:', error);
+        alert('Failed to create announcement. Please try again.');
+
+        // Reset button state
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+    }
+}
+
+function loadAnnouncements() {
+    try {
+        // Load announcements from localStorage
+        let announcements = JSON.parse(localStorage.getItem('announcements') || '[]');
+
+        // If no announcements exist, create some sample data
+        if (announcements.length === 0) {
+            announcements = [
+                {
+                    id: 1,
+                    message: 'System maintenance will be performed this weekend. Please expect brief service interruptions.',
+                    importance: 'high',
+                    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() // 2 days ago
+                },
+                {
+                    id: 2,
+                    message: 'New features have been added to the platform. Check out the updated interface and improved functionality.',
+                    importance: 'medium',
+                    created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() // 1 day ago
+                },
+                {
+                    id: 3,
+                    message: 'Holiday schedule update: Customer support will have limited hours during the holiday season.',
+                    importance: 'low',
+                    created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() // 3 hours ago
+                }
+            ];
+            localStorage.setItem('announcements', JSON.stringify(announcements));
+        }
+
+        // Sort announcements by date descending (newest first)
+        announcements.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        renderAnnouncements(announcements);
+    } catch (error) {
+        console.error('Error loading announcements:', error);
+        renderAnnouncements([]); // Show empty state
+    }
+}
+
+function renderAnnouncements(announcements) {
+    const grid = document.getElementById('announcements-grid');
+
+    if (!grid) {
+        console.error('Announcements grid not found');
+        return;
+    }
+
+    if (!announcements || announcements.length === 0) {
+        grid.innerHTML = `
+            <div class="announcements-empty">
+                <i class="fas fa-bullhorn"></i>
+                <h3>No Announcements</h3>
+                <p>No announcements have been created yet. Click "Add Announcement" to create your first one.</p>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = announcements.map((announcement, index) => {
+        const createdDate = new Date(announcement.created_at);
+        const formattedDate = createdDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+        const formattedTime = createdDate.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        const importanceIcon = {
+            'high': 'exclamation-triangle',
+            'medium': 'info-circle',
+            'low': 'info'
+        }[announcement.importance] || 'info';
+
+        const displayNumber = index + 1; // UI numbering, not DB id
+        const views = JSON.parse(localStorage.getItem('announcement_views') || '{}');
+        const viewCount = views[announcement.id] ? Object.keys(views[announcement.id]).length : 0;
+
+        return `
+            <div class="announcement-card ${announcement.importance}">
+                <div class="announcement-header">
+                    <h3 class="announcement-title">Announcement #${displayNumber}</h3>
+                    <div class="announcement-actions">
+                        <button class="action-btn" title="Seen by shops" onclick="openAnnouncementViewsModal(${announcement.id})" style="gap:6px; display:inline-flex; align-items:center;">
+                            <i class="fas fa-eye"></i>
+                            <span style="font-size:12px; color:var(--text-secondary);">${viewCount}</span>
+                        </button>
+                        <button class="action-btn delete" onclick="deleteAnnouncement(${announcement.id})" title="Delete announcement">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="announcement-content" onclick="openAnnouncementViewsModal(${announcement.id})" style="cursor:pointer;">
+                    <p class="announcement-message">${announcement.message}</p>
+                    <div class="announcement-meta">
+                        <span class="announcement-date">
+                            <i class="fas fa-calendar"></i>
+                            Made: ${formattedDate} ${formattedTime}
+                        </span>
+                        <span class="announcement-importance ${announcement.importance}">
+                            <i class="fas fa-${importanceIcon}"></i>
+                            ${announcement.importance.charAt(0).toUpperCase() + announcement.importance.slice(1)} Importance
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function deleteAnnouncement(id) {
+    if (!confirm('Are you sure you want to delete this announcement?')) {
+        return;
+    }
+    try {
+        const existingAnnouncements = JSON.parse(localStorage.getItem('announcements') || '[]');
+        const updatedAnnouncements = existingAnnouncements.filter(announcement => announcement.id !== id);
+        localStorage.setItem('announcements', JSON.stringify(updatedAnnouncements));
+        alert('Announcement deleted successfully!');
+        loadAnnouncements();
+    } catch (error) {
+        console.error('Error deleting announcement:', error);
+        alert('Failed to delete announcement. Please try again.');
+    }
+}
+
+function openAnnouncementViewsModal(announcementId) {
+    try {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+        // Close when clicking outside the modal
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+                document.body.style.overflow = 'auto';
+            }
+        });
+
+        const viewsMap = JSON.parse(localStorage.getItem('announcement_views') || '{}');
+        const entries = Object.entries(viewsMap[announcementId] || {});
+
+        const shops = (window.dashboard && window.dashboard.shops) ? window.dashboard.shops : [];
+        const nameFor = (sid) => {
+            const s = shops.find(x => String(x.id) === String(sid));
+            return s ? (s.shop_name || s.name || s.store_name || `Shop ${sid}`) : `Shop ${sid}`;
+        };
+
+        const listItems = entries
+            .sort((a,b)=> (b[1]?.ts||0) - (a[1]?.ts||0))
+            .map(([sid, info]) => {
+                const when = info?.ts ? new Date(info.ts).toLocaleString() : '';
+                return `<li style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border);">
+                            <span style=\"color:var(--text-primary);\">${nameFor(sid)}</span>
+                            <span style=\"font-size:12px; color:var(--text-secondary);\">${when}</span>
+                        </li>`;
+            }).join('') || `<div style=\"color:var(--text-secondary); padding:8px 0;\">No shops have viewed this announcement yet.</div>`;
+
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:600px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-eye"></i> Seen by ${entries.length} shop(s)</h3>
+                    <button class="modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <ul style="list-style:none; margin:0; padding:0;">${listItems}</ul>
+                </div>
+            </div>`;
+
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden';
+
+        // Wire close button
+        const closeBtn = overlay.querySelector('.modal-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                document.body.style.overflow = 'auto';
+            });
+        }
+    } catch (e) {
+        console.error('Failed to open views modal', e);
+    }
+}
+
+
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     try {
         console.log('Initializing dashboard...');
-    window.dashboard = new Dashboard();
+        window.dashboard = new Dashboard();
         console.log('Dashboard initialized successfully');
     } catch (error) {
         console.error('Error initializing dashboard:', error);
@@ -3193,11 +3703,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Dashboard not properly initialized');
                 alert('Dashboard is not properly loaded. Please refresh the page.');
             },
+            openAnnouncementModal: openAnnouncementModal,
             showToast: (message, type) => {
                 console.log(`Toast (${type}): ${message}`);
             }
         };
     }
+
+    // Modal UX bindings
+    const overlay = document.getElementById('announcement-modal');
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeAnnouncementModal();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAnnouncementModal();
+    });
+
+    // Live update listeners (announcements + views)
+    window.addEventListener('storage', (e) => {
+        if (['announcements','announcements_updated_at','announcement_views','announcement_views_updated_at'].includes(e.key)) {
+            try { loadAnnouncements(); } catch (_) {}
+        }
+    });
+    try {
+        if (window.BroadcastChannel) {
+            const bc1 = new BroadcastChannel('announcements');
+            bc1.onmessage = (ev) => { if (ev?.data?.type === 'updated') { try { loadAnnouncements(); } catch(_){} } };
+            const bc2 = new BroadcastChannel('announcement_views');
+            bc2.onmessage = (ev) => { if (ev?.data?.type === 'updated') { try { loadAnnouncements(); } catch(_){} } };
+            window._annChannels = [bc1, bc2];
+        }
+    } catch (e) { console.warn('BroadcastChannel not available', e); }
 });
 
 // Fallback: Ensure dashboard is available even if DOMContentLoaded already fired
@@ -3223,4 +3761,4 @@ if (document.readyState === 'loading') {
             };
         }
     }
-} 
+}

@@ -226,7 +226,7 @@
             <div class="page-header">
                 <h2>Shop Profile</h2>
             </div>
-            
+
             <div class="profile-container">
                 <div class="profile-card">
                     <div class="profile-header">
@@ -238,7 +238,7 @@
                             <p id="profile-email">shop@example.com</p>
                         </div>
                     </div>
-                    
+
                     <div class="profile-actions">
                         <button class="btn primary" id="change-password-btn">
                             <i class="fas fa-key"></i>
@@ -248,6 +248,94 @@
                             <i class="fas fa-sign-out-alt"></i>
                             Logout
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Announcements Page -->
+        <div id="announcements-page" class="page">
+            <div class="page-header">
+                <div class="header-content" style="display: flex; align-items: center; gap: 16px;">
+                    <button onclick="shopApp.navigateToPage('profile')" style="
+                        background: none;
+                        border: none;
+                        color: #6b7280;
+                        font-size: 20px;
+                        cursor: pointer;
+                        padding: 8px;
+                        border-radius: 8px;
+                        transition: all 0.2s;
+                    " onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151';" onmouseout="this.style.backgroundColor='transparent'; this.style.color='#6b7280';">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h2 style="margin: 0;">Announcements</h2>
+                </div>
+            </div>
+
+            <div class="announcements-container" style="padding: 20px; max-width: 600px; margin: 0 auto;">
+                <div class="announcements-content" style="
+                    background: white;
+                    border-radius: 16px;
+                    padding: 32px 24px;
+                    text-align: center;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+                    border: 1px solid #f1f5f9;
+                ">
+                    <div style="
+                        width: 80px;
+                        height: 80px;
+                        background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 24px;
+                        box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+                    ">
+                        <i class="fas fa-bullhorn" style="font-size: 32px; color: white;"></i>
+                    </div>
+
+                    <h3 style="
+                        font-size: 24px;
+                        font-weight: 700;
+                        color: #111827;
+                        margin: 0 0 16px 0;
+                    ">Announcements</h3>
+
+                    <p style="
+                        font-size: 16px;
+                        color: #6b7280;
+                        line-height: 1.6;
+                        margin: 0 0 24px 0;
+                    ">Future announcements from admins will be displayed here. Stay tuned for important updates and notifications!</p>
+
+                    <div style="
+                        background: #f8fafc;
+                        border: 1px solid #e2e8f0;
+                        border-radius: 12px;
+                        padding: 16px;
+                        margin-top: 24px;
+                    ">
+                        <div style="
+                            display: flex;
+                            align-items: center;
+                            gap: 12px;
+                            margin-bottom: 8px;
+                        ">
+                            <i class="fas fa-info-circle" style="color: #3b82f6; font-size: 18px;"></i>
+                            <span style="
+                                font-weight: 600;
+                                color: #1e293b;
+                                font-size: 14px;
+                            ">Coming Soon</span>
+                        </div>
+                        <p style="
+                            font-size: 14px;
+                            color: #64748b;
+                            margin: 0;
+                            line-height: 1.5;
+                        ">This feature is currently under development. You'll receive notifications when new announcements are available.</p>
                     </div>
                 </div>
             </div>

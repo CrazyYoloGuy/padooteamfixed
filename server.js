@@ -372,15 +372,17 @@ function broadcastNotificationUpdate(userId, userType, action, notificationId, d
     return { sent: updatesSent, failed: failedSends };
 }
 
-// Supabase setup
+// Supabase setup (prefer service role for server-side operations)
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // recommended for server
+const supabaseKey = supabaseServiceKey || supabaseAnonKey;
 
 if (!supabaseUrl || !supabaseKey) {
     console.error('❌ Supabase configuration missing!');
     console.error('Please check your .env file has:');
     console.error('- SUPABASE_URL');
-    console.error('- SUPABASE_ANON_KEY');
+    console.error('- SUPABASE_SERVICE_ROLE_KEY (recommended) or SUPABASE_ANON_KEY');
     process.exit(1);
 }
 
@@ -5114,6 +5116,7 @@ async function sendPushNotification(userId, userType, notificationData) {
                     order_id: notificationData.order_id,
                     data: {
                         ...notificationData,
+                        userId: userId,
                         timestamp: Date.now(),
                         priority: 'high',
                         category: 'order'
