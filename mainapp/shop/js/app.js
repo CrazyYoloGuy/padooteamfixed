@@ -65,6 +65,11 @@ class ShopApp {
 
         // Request notification permission
         this.requestNotificationPermission();
+        // If permission already granted, ensure push subscription is registered
+        if ('Notification' in window && Notification.permission === 'granted') {
+            try { await this.setupShopPushSubscription(); } catch (e) { console.warn('Shop push subscription setup failed:', e); }
+        }
+
 
         // Preload team members for better performance
         this.preloadTeamMembers();
@@ -530,6 +535,10 @@ class ShopApp {
             case 'announcements':
                 this.stopTimestampUpdates();
                 this.loadAnnouncementsPage();
+                break;
+            case 'analytics':
+                this.stopTimestampUpdates();
+                this.renderAnalyticsPage();
                 break;
         }
     }
@@ -1774,6 +1783,19 @@ class ShopApp {
         });
     }
 
+    // Utilities: format day as YYYY-MM-DD
+    getTodayYMD() {
+        const d = new Date();
+        return this.formatYMD(d);
+    }
+    formatYMD(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+
     timeAgo(date) {
         // Simple, reliable Greek time display
         const notificationDate = new Date(date);
@@ -2287,6 +2309,42 @@ class ShopApp {
                         <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                     </div>
 
+                        <!-- Analytics (placeholder) -->
+                        <div onclick="shopApp.navigateToPage('analytics')" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 16px 20px;
+                            cursor: pointer;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                            <div style="
+                                width: 40px;
+                                height: 40px;
+                                background: #e0f2fe;
+                                border-radius: 10px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                margin-right: 16px;
+                            ">
+                                <i class="fas fa-chart-line" style="color: #0ea5e9; font-size: 18px;"></i>
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="
+                                    font-size: 16px;
+                                    font-weight: 500;
+                                    color: #111827;
+                                    margin-bottom: 2px;
+                                ">Analytics</div>
+                                <div style="
+                                    font-size: 13px;
+                                    color: #6b7280;
+                                ">Insights and metrics (coming soon)</div>
+                            </div>
+                            <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                        </div>
+
+
                     <!-- Settings -->
                     <div onclick="shopApp.showPasswordModal()" style="
                         display: flex;
@@ -2447,6 +2505,9 @@ class ShopApp {
                             <div class="notification-preview">
                                 ${this.truncateText(notification.message || 'No message', 50)}
                             </div>
+
+
+
                             <div class="notification-time-widget">
                                 <i class="fas fa-clock"></i>
                                 ${this.timeAgo(new Date(notification.created_at))}
@@ -2467,6 +2528,16 @@ class ShopApp {
         if (text.length <= maxLength) return text;
         return text.substring(0, maxLength) + '...';
     }
+
+    // Placeholder: open Analytics option from Profile
+    openAnalytics() {
+        try {
+            this.showToast('Analytics coming soon. I will wire this up once you confirm details.', 'info');
+        } catch (_) {
+            alert('Analytics coming soon');
+        }
+    }
+
 
     // Add method to open notification details
     openNotificationDetails(notificationId) {
@@ -4136,6 +4207,12 @@ class ShopApp {
     handleRealtimeNotification(notification) {
         console.log('🔔 Shop received real-time notification:', notification);
 
+        // Route order acceptance to dedicated handler for instant UI update
+        if (notification && notification.type === 'order_accepted') {
+            try { this.handleOrderAccepted(notification); } catch (e) { console.error('handleOrderAccepted failed:', e); }
+            return;
+        }
+
         // Check if notification already exists (for updates)
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id);
         if (existingIndex !== -1) {
@@ -4256,6 +4333,65 @@ class ShopApp {
         }
     }
 
+
+        // ===== Real push subscription (Shop) =====
+        getApplicationServerKey() {
+            // Must match server VAPID public key and sw.js
+            return 'BG_qTrWFr2qESzBzbog1Ajx_6r79bf4WheyZD2jgdzz_o68TzMkzR4Fd-WS0Y-G2gJK7xQcD0HvQ259UgQk4kM8';
+        }
+
+        urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+
+        async setupShopPushSubscription() {
+            try {
+                if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                    console.warn('Push not supported in this browser');
+                    return false;
+                }
+                const registration = await navigator.serviceWorker.ready;
+                let subscription = await registration.pushManager.getSubscription();
+                if (!subscription) {
+                    const vapid = this.getApplicationServerKey();
+                    subscription = await registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: this.urlBase64ToUint8Array(vapid)
+                    });
+                }
+                // Send subscription to server for this shop
+                const body = {
+                    subscription,
+                    userId: this.shopId || this.currentShop?.id,
+                    userType: 'shop'
+                };
+                const resp = await fetch('/api/push/subscription', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(this.sessionToken ? { 'Authorization': `Bearer ${this.sessionToken}` } : {})
+                    },
+                    body: JSON.stringify(body)
+                });
+                if (!resp.ok) {
+                    console.warn('Failed to save shop push subscription:', await resp.text());
+                    return false;
+                }
+                console.log('✅ Shop push subscription saved');
+                return true;
+            } catch (e) {
+                console.warn('Shop push subscription error:', e);
+                return false;
+            }
+        }
+
     // Show custom notification permission modal
     showNotificationPermissionModal() {
         const modal = document.createElement('div');
@@ -4356,15 +4492,15 @@ class ShopApp {
 
         // Handle allow button
         const allowBtn = modal.querySelector('.permission-btn.allow');
-        allowBtn.addEventListener('click', () => {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    this.showToast('🎉 Notifications enabled! You\'ll receive real-time driver confirmations.', 'success');
-                } else {
-                    this.showToast('Notifications disabled. You can enable them in your browser settings.', 'warning');
-                }
-                modal.remove();
-            });
+        allowBtn.addEventListener('click', async () => {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                this.showToast('🎉 Notifications enabled! You\'ll receive real-time driver confirmations.', 'success');
+                try { await this.setupShopPushSubscription(); } catch (e) { console.warn('Shop push setup failed:', e); }
+            } else {
+                this.showToast('Notifications disabled. You can enable them in your browser settings.', 'warning');
+            }
+            modal.remove();
         });
 
         // Handle deny button
@@ -4428,6 +4564,11 @@ class ShopApp {
                 accentColor = '#10b981';
                 iconClass = 'fas fa-check-circle';
                 message = '✅ Order confirmed';
+                break;
+            case 'accepted':
+                accentColor = '#3b82f6';
+                iconClass = 'fas fa-handshake';
+                message = '🚗 Order accepted';
                 break;
             case 'deleted':
                 accentColor = '#ef4444';
@@ -4851,23 +4992,36 @@ class ShopApp {
         }
     }
 
-    // Handle order accepted by driver (live removal from Pending)
+    // Handle order accepted by driver (live move Pending -> Accepted + notify)
     handleOrderAccepted(data) {
         try {
             const orderId = data.orderId || data.order_id || data.order?.id;
             const driverId = data.driverId || data.accepted_by || data.order?.driver_id;
             if (!orderId) return;
 
+            const driverName = (data.driver && (data.driver.name || data.driver.email))
+                || (data.order && data.order.users && (data.order.users.name || data.order.users.email))
+                || (data.order && (data.order.driver_name || data.order.driver_email))
+                || 'Driver';
+            const driverEmail = (data.driver && data.driver.email)
+                || (data.order && data.order.users && data.order.users.email)
+                || data.order?.driver_email
+                || '';
+
             // Update cached orders so filters reflect new state instantly
             if (this._ordersCache && this._ordersCache.data) {
                 const idx = this._ordersCache.data.findIndex(o => String(o.id) === String(orderId));
                 if (idx !== -1) {
+                    const current = this._ordersCache.data[idx];
                     const updated = {
-                        ...this._ordersCache.data[idx],
+                        ...current,
                         status: 'assigned',
-                        driver_id: driverId || this._ordersCache.data[idx].driver_id,
+                        driver_id: driverId || current.driver_id,
                         updated_at: new Date().toISOString()
                     };
+                    if (driverId && (data.driver || data.order?.users)) {
+                        updated.users = data.driver || data.order?.users;
+                    }
                     this._ordersCache.data[idx] = updated;
                 } else if (data.order && data.order.id) {
                     // If server sent the full order, add it to cache (already assigned)
@@ -4886,19 +5040,28 @@ class ShopApp {
                 setTimeout(() => card.remove(), 180);
             }
 
-            // Refresh dashboard orders area if visible
+            // If dashboard is visible, do NOT auto-switch tabs. Just re-render with current filter.
             if (this.currentPage === 'dashboard') {
                 const orders = this._ordersCache?.data || [];
                 this.renderDashboardOrders(orders, true);
             }
 
-            // If Orders page is visible, re-render (in case it shows pending blocks)
+            // If Orders page is visible, re-render
             if (this.currentPage === 'orders') {
                 this.renderOrdersPage();
             }
 
-            // Subtle info toast for visibility
-            this.showToast('Order accepted by driver', 'info');
+            // Push a modern in-app notification with driver name
+            if (typeof this.playConfirmationSound === 'function') {
+                try { this.playConfirmationSound(); } catch (_) {}
+            }
+            this.showBrowserNotification({
+                action: 'accepted',
+                driver_email: driverEmail || driverName,
+                message: `Order #${orderId} accepted by ${driverName}`,
+                id: `accept-${orderId}-${Date.now()}`
+            });
+
         } catch (e) {
             console.error('Error handling order_accepted:', e);
         }
@@ -5403,6 +5566,121 @@ class ShopApp {
             }
 
             // Ultra-fast rendering with progressive loading
+
+    /* Analytics Page (moved below)
+    async renderAnalyticsPage() {
+        const controls = document.getElementById('analytics-controls');
+        const summaryEl = document.getElementById('analytics-summary');
+        const ordersEl = document.getElementById('analytics-orders');
+        if (!controls || !summaryEl || !ordersEl) return;
+
+        const selected = this.analyticsDate || this.getTodayYMD();
+        controls.innerHTML = `
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap: wrap;">
+                <label style="font-weight:600; color:#111827;">Select day:</label>
+                <input id="analytics-date-input" type="date" value="${selected}" style="
+                    padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:14px;" />
+                <button id="analytics-refresh-btn" style="
+                    background:#10b981; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer;">
+                    Refresh
+                </button>
+            </div>`;
+
+        document.getElementById('analytics-date-input').addEventListener('change', (e) => {
+            this.analyticsDate = e.target.value;
+        });
+        document.getElementById('analytics-refresh-btn').addEventListener('click', () => {
+            const d = (document.getElementById('analytics-date-input').value) || this.getTodayYMD();
+            this.loadAnalytics(d, 20, 0);
+        });
+
+        summaryEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading summary…</div>';
+        ordersEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading orders…</div>';
+
+        await this.loadAnalytics(selected, 20, 0);
+    }
+
+    async loadAnalytics(dateYMD, limit = 20, offset = 0) {
+        if (!this.currentShop || !this.currentShop.id) return;
+        const summaryEl = document.getElementById('analytics-summary');
+        const ordersEl = document.getElementById('analytics-orders');
+        try {
+            const url = `/api/shop/${this.currentShop.id}/analytics?date=${encodeURIComponent(dateYMD)}&limit=${limit}&offset=${offset}`;
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${this.sessionToken}` } });
+            if (!resp.ok) throw new Error('Failed to load analytics');
+            const { summary, orders, nextOffset, hasMore } = await resp.json();
+            this.analyticsDate = dateYMD;
+
+            this.renderAnalyticsSummary(summary);
+            this.renderAnalyticsOrders(orders, offset > 0);
+
+            // Load more button
+            let loadMore = document.getElementById('analytics-load-more');
+            if (loadMore) loadMore.remove();
+            if (hasMore) {
+                loadMore = document.createElement('button');
+                loadMore.id = 'analytics-load-more';
+                loadMore.textContent = 'Load more';
+                loadMore.style.cssText = 'margin:12px auto; display:block; padding:8px 12px; border:1px solid #e5e7eb; border-radius:8px; background:white; cursor:pointer;';
+                loadMore.addEventListener('click', () => {
+                    loadMore.disabled = true; loadMore.textContent = 'Loading…';
+                    this.loadAnalytics(dateYMD, limit, nextOffset);
+                });
+                ordersEl.appendChild(loadMore);
+            }
+        } catch (e) {
+            console.error('Analytics load error', e);
+            summaryEl.innerHTML = '<div style="padding:12px; color:#ef4444;">Failed to load analytics</div>';
+            ordersEl.innerHTML = '';
+        }
+    }
+
+    renderAnalyticsSummary(summary) {
+        const el = document.getElementById('analytics-summary');
+        if (!el || !summary) return;
+        const kpi = (label, value, color) => `<div style="flex:1; min-width:140px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:12px;">
+            <div style="font-size:12px; color:#6b7280;">${label}</div>
+            <div style="font-size:20px; font-weight:700; color:${color}">${value}</div>
+        </div>`;
+
+        // Simple per-hour bar chart
+        const bars = (summary.per_hour || []).map((c, i) => {
+            const h = Math.min(80, c * 8);
+            return `<div style=\"display:flex; flex-direction:column; align-items:center; gap:6px;\">
+                        <div style=\"width:16px; height:${h}px; background:#93c5fd; border-radius:6px;\"></div>
+                        <div style=\"font-size:10px; color:#6b7280;\">${i}</div>
+                    </div>`;
+        }).join('');
+
+        const topDriver = summary.top_driver ? `${summary.top_driver.name || 'Driver'} (${summary.top_driver.delivered})` : '—';
+
+        el.innerHTML = `
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                ${kpi('Total Orders', summary.total_orders, '#111827')}
+                ${kpi('Revenue (€)', summary.total_revenue.toFixed(2), '#10b981')}
+                ${kpi('Driver Earnings (€)', summary.total_driver_earnings.toFixed(2), '#3b82f6')}
+                ${kpi('Top Driver', topDriver, '#ef4444')}
+            </div>
+            <div style="margin-top:16px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:12px;">
+                <div style="font-weight:600; color:#111827; margin-bottom:8px;">Orders per hour</div>
+                <div style="display:grid; grid-template-columns: repeat(24, minmax(0, 1fr)); align-items:end; gap:6px;">
+                    ${bars}
+                </div>
+            </div>`;
+    }
+
+    renderAnalyticsOrders(orders, append = false) {
+        const el = document.getElementById('analytics-orders');
+        if (!el) return;
+        const html = (orders || []).map(o => this.createCompletedOrderCard(o)).join('');
+        if (append) el.insertAdjacentHTML('beforeend', html);
+        else el.innerHTML = html;
+        // Reattach card listeners
+        this.setupShopOrderCardClickListeners && this.setupShopOrderCardClickListeners();
+    }
+    */
+
+
             this.renderCompletedOrdersOptimized(contentArea, completedOrders);
 
         } catch (error) {
@@ -5429,15 +5707,17 @@ class ShopApp {
         const now = Date.now();
         const cacheFreshMs = 2 * 60 * 1000; // 2 minute client cache
 
-        // Check client cache first
-        if (this._completedOrdersCache && (now - this._completedOrdersCache.time < cacheFreshMs)) {
-            console.log('Using cached completed orders');
+        const dateYMD = this.getTodayYMD();
+
+        // Check client cache first (per-date)
+        if (this._completedOrdersCache && (now - this._completedOrdersCache.time < cacheFreshMs) && this._completedOrdersCache.date === dateYMD) {
+            console.log('Using cached completed orders (today)');
             return this._completedOrdersCache.data;
         }
 
-        console.log('Fetching fresh completed orders for shop:', this.currentShop.id);
+        console.log('Fetching fresh completed orders for shop:', this.currentShop.id, 'date:', dateYMD);
 
-        const response = await fetch(`/api/shop/${this.currentShop.id}/completed-orders`, {
+        const response = await fetch(`/api/shop/${this.currentShop.id}/completed-orders?date=${encodeURIComponent(dateYMD)}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${this.sessionToken}`,
@@ -5465,8 +5745,8 @@ class ShopApp {
             console.log('Sample completed order structure:', orders[0]);
         }
 
-        // Cache the results
-        this._completedOrdersCache = { time: now, data: orders };
+        // Cache the results (per-date)
+        this._completedOrdersCache = { time: now, date: dateYMD, data: orders };
 
         return orders;
     }
@@ -5478,13 +5758,17 @@ class ShopApp {
 
         // Render first 8 orders immediately for instant feedback
         requestAnimationFrame(() => {
+            // Build per-day index (1,2,3...) based on creation time ascending
+            const asc = [...(orders || [])].sort((a,b)=> new Date(a.created_at) - new Date(b.created_at));
+            const indexMap = new Map(); asc.forEach((o,i)=> indexMap.set(o.id, i+1));
+
             const firstBatch = orders.slice(0, 8);
-            const firstHTML = firstBatch.map(order => this.createCompletedOrderCard(order)).join('');
+            const firstHTML = firstBatch.map(order => this.createCompletedOrderCard({ ...order, _displayIndex: indexMap.get(order.id) })).join('');
             container.innerHTML = firstHTML;
 
             // Render remaining orders in chunks
             if (orders.length > 8) {
-                this.renderRemainingOrdersChunked(container, orders.slice(8));
+                this.renderRemainingOrdersChunked(container, orders.slice(8), indexMap);
             }
 
             // Set up click listeners
@@ -5493,12 +5777,12 @@ class ShopApp {
     }
 
     // Render remaining orders in chunks to keep UI responsive
-    async renderRemainingOrdersChunked(container, remainingOrders) {
+    async renderRemainingOrdersChunked(container, remainingOrders, indexMap) {
         const chunkSize = 10;
         for (let i = 0; i < remainingOrders.length; i += chunkSize) {
             await new Promise(requestAnimationFrame);
             const chunk = remainingOrders.slice(i, i + chunkSize);
-            const html = chunk.map(order => this.createCompletedOrderCard(order)).join('');
+            const html = chunk.map(order => this.createCompletedOrderCard({ ...order, _displayIndex: indexMap?.get(order.id) })).join('');
             container.insertAdjacentHTML('beforeend', html);
         }
     }
@@ -5587,8 +5871,21 @@ class ShopApp {
 
                 <div style="padding: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <div style="font-weight: 600; color: #111827; font-size: 16px;">
-                            Order #${orderId}
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="
+                                width: 28px;
+                                height: 28px;
+                                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                                border-radius: 8px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">
+                                ${order._displayIndex != null ? `<span style='color: white; font-weight: 800; font-size: 13px;'>${order._displayIndex}</span>` : `<i class=\"fas fa-shopping-bag\" style=\"color: white; font-size: 14px;\"></i>`}
+                            </div>
+                            <div style="font-weight: 600; color: #111827; font-size: 16px;">
+                                Order #${orderId}
+                            </div>
                         </div>
                         <div style="
                             background: #dcfce7;
@@ -6616,7 +6913,204 @@ class ShopApp {
                 }
             }
         }
+
+
+                }
+    // Analytics Page (final)
+    async renderAnalyticsPage() {
+        const controls = document.getElementById('analytics-controls');
+        const summaryEl = document.getElementById('analytics-summary');
+        const ordersEl = document.getElementById('analytics-orders');
+        if (!controls || !summaryEl || !ordersEl) return;
+
+        const viewMode = this.analyticsViewMode || 'daily';
+        const selectedDay = this.analyticsDate || this.getTodayYMD();
+        const selectedMonth = this.analyticsMonth || (new Date().toISOString().slice(0,7));
+
+        const viewSelect = `
+            <label style="font-weight:600; color:#111827;">View:</label>
+            <select id="analytics-view" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:14px;">
+                <option value="daily" ${viewMode==='daily'?'selected':''}>Daily</option>
+                <option value="monthly" ${viewMode==='monthly'?'selected':''}>Monthly Report</option>
+            </select>`;
+
+        const inputHtml = viewMode === 'monthly'
+            ? `<label style="font-weight:600; color:#111827;">Select month:</label>
+               <input id="analytics-month-input" type="month" value="${selectedMonth}" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:14px;" />`
+            : `<label style="font-weight:600; color:#111827;">Select day:</label>
+               <input id="analytics-date-input" type="date" value="${selectedDay}" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:14px;" />`;
+
+        controls.innerHTML = `
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap: wrap;">
+                ${viewSelect}
+                ${inputHtml}
+                <button id="analytics-refresh-btn" style="background:#10b981; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer;">Refresh</button>
+            </div>`;
+
+        const viewEl = document.getElementById('analytics-view');
+        viewEl && viewEl.addEventListener('change', (e) => {
+            this.analyticsViewMode = e.target.value;
+            // Re-render controls to swap input type and keep UX consistent
+            this.renderAnalyticsPage();
+        });
+
+        if (viewMode === 'monthly') {
+            const mi = document.getElementById('analytics-month-input');
+            mi && mi.addEventListener('change', (e) => { this.analyticsMonth = e.target.value; });
+        } else {
+            const di = document.getElementById('analytics-date-input');
+            di && di.addEventListener('change', (e) => { this.analyticsDate = e.target.value; });
+        }
+
+        document.getElementById('analytics-refresh-btn').addEventListener('click', async () => {
+            if ((this.analyticsViewMode || 'daily') === 'monthly') {
+                const m = (document.getElementById('analytics-month-input').value) || (new Date().toISOString().slice(0,7));
+                summaryEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading monthly report…</div>';
+                ordersEl.innerHTML = '';
+                await this.loadMonthlyAnalytics(m);
+            } else {
+                const d = (document.getElementById('analytics-date-input').value) || this.getTodayYMD();
+                summaryEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading summary…</div>';
+                ordersEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading orders…</div>';
+                await this.loadAnalytics(d, 20, 0);
+            }
+        });
+
+        if (viewMode === 'monthly') {
+            summaryEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading monthly report…</div>';
+            ordersEl.innerHTML = '';
+            await this.loadMonthlyAnalytics(selectedMonth);
+        } else {
+            summaryEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading summary…</div>';
+            ordersEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading orders…</div>';
+            await this.loadAnalytics(selectedDay, 20, 0);
+        }
     }
+
+    async loadAnalytics(dateYMD, limit = 20, offset = 0) {
+        if (!this.currentShop || !this.currentShop.id) return;
+        const summaryEl = document.getElementById('analytics-summary');
+        const ordersEl = document.getElementById('analytics-orders');
+        try {
+            const url = `/api/shop/${this.currentShop.id}/analytics?date=${encodeURIComponent(dateYMD)}&limit=${limit}&offset=${offset}`;
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${this.sessionToken}` } });
+            if (!resp.ok) throw new Error('Failed to load analytics');
+            const { summary, orders, nextOffset, hasMore } = await resp.json();
+            this.analyticsDate = dateYMD;
+            this._analyticsLastSummary = summary;
+
+            this.renderAnalyticsSummary(summary);
+            this.renderAnalyticsOrders(orders, offset > 0);
+
+            // Load more button
+            let loadMore = document.getElementById('analytics-load-more');
+            if (loadMore) loadMore.remove();
+            if (hasMore) {
+                loadMore = document.createElement('button');
+                loadMore.id = 'analytics-load-more';
+                loadMore.textContent = 'Load more';
+                loadMore.style.cssText = 'margin:12px auto; display:block; padding:8px 12px; border:1px solid #e5e7eb; border-radius:8px; background:white; cursor:pointer;';
+                loadMore.addEventListener('click', () => {
+                    loadMore.disabled = true; loadMore.textContent = 'Loading…';
+                    this.loadAnalytics(dateYMD, limit, nextOffset);
+                });
+                ordersEl.appendChild(loadMore);
+            }
+        } catch (e) {
+            console.error('Analytics load error', e);
+            summaryEl.innerHTML = '<div style="padding:12px; color:#ef4444;">Failed to load analytics</div>';
+            ordersEl.innerHTML = '';
+        }
+    }
+
+
+
+    async loadMonthlyAnalytics(monthStr) {
+        if (!this.currentShop || !this.currentShop.id) return;
+        const summaryEl = document.getElementById('analytics-summary');
+        const ordersEl = document.getElementById('analytics-orders');
+        try {
+            const url = `/api/shop/${this.currentShop.id}/analytics/monthly?month=${encodeURIComponent(monthStr)}`;
+            const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${this.sessionToken}` } });
+            if (!resp.ok) throw new Error('Failed to load monthly analytics');
+            const { summary } = await resp.json();
+            this.analyticsMonth = monthStr;
+            this._analyticsLastMonthlySummary = summary;
+            this.renderMonthlySummary(summary);
+            // Monthly report does not list orders
+            ordersEl.innerHTML = '';
+        } catch (e) {
+            console.error('Monthly analytics load error', e);
+            summaryEl.innerHTML = '<div style="padding:12px; color:#ef4444;">Failed to load monthly report</div>';
+            ordersEl.innerHTML = '';
+        }
+    }
+
+    renderMonthlySummary(summary) {
+        const el = document.getElementById('analytics-summary');
+        if (!el || !summary) return;
+        const kpi = (label, value, color) => `<div style="flex:1; min-width:160px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:12px;">
+            <div style="font-size:12px; color:#6b7280;">${label}</div>
+            <div style="font-size:20px; font-weight:700; color:${color}">${value}</div>
+        </div>`;
+
+        const topDriver = summary.top_driver ? `${summary.top_driver.name || 'Driver'} (${summary.top_driver.delivered})` : '—';
+        const peakDayLabel = summary.peak_day ? `${summary.peak_day}${summary.peak_day_count ? ` (${summary.peak_day_count} orders)` : ''}` : '—';
+
+        el.innerHTML = `
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                ${kpi('Total Orders (Month)', summary.total_orders, '#111827')}
+                ${kpi('Revenue (€) (Month)', Number(summary.total_revenue).toFixed(2), '#10b981')}
+                ${kpi('Peak Day', peakDayLabel, '#8b5cf6')}
+                ${kpi('Top Driver', topDriver, '#ef4444')}
+            </div>`;
+    }
+
+
+    renderAnalyticsSummary(summary) {
+        const el = document.getElementById('analytics-summary');
+        if (!el || !summary) return;
+        const kpi = (label, value, color) => `<div style="flex:1; min-width:140px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:12px;">
+            <div style="font-size:12px; color:#6b7280;">${label}</div>
+            <div style="font-size:20px; font-weight:700; color:${color}">${value}</div>
+        </div>`;
+
+        // Compute peak hour (1-hour grouping)
+        const perHour = Array.isArray(summary.per_hour) ? summary.per_hour : new Array(24).fill(0);
+        let peakIdx = 0, peakVal = perHour[0] || 0;
+        for (let i = 1; i < perHour.length; i++) {
+            if ((perHour[i] || 0) > peakVal) { peakVal = perHour[i] || 0; peakIdx = i; }
+        }
+        const timeOfDayLabel = (h) => {
+            if (h >= 6 && h < 12) return 'Morning';
+            if (h >= 12 && h < 18) return 'Afternoon';
+            if (h >= 18 && h < 24) return 'Evening';
+            return 'Night';
+        };
+        const peakHourLabel = peakVal > 0 ? `${peakIdx} - ${Math.min(24, peakIdx + 1)} ${timeOfDayLabel(peakIdx)}` : '—';
+
+        const topDriver = summary.top_driver ? `${summary.top_driver.name || 'Driver'} (${summary.top_driver.delivered})` : '—';
+
+        // KPIs only; removed "Orders by time" chart
+        el.innerHTML = `
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                ${kpi('Total Orders', summary.total_orders, '#111827')}
+                ${kpi('Revenue (€)', Number(summary.total_revenue).toFixed(2), '#10b981')}
+                ${kpi('Peak Hour', peakHourLabel, '#8b5cf6')}
+                ${kpi('Top Driver', topDriver, '#ef4444')}
+            </div>`;
+    }
+
+    renderAnalyticsOrders(orders, append = false) {
+        const el = document.getElementById('analytics-orders');
+        if (!el) return;
+        const html = (orders || []).map(o => this.createCompletedOrderCard(o)).join('');
+        if (append) el.insertAdjacentHTML('beforeend', html);
+        else el.innerHTML = html;
+        // Reattach card listeners
+        this.setupShopOrderCardClickListeners && this.setupShopOrderCardClickListeners();
+    }
+
 }
 
 // Make app available globally

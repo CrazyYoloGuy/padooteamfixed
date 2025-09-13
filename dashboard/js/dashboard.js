@@ -96,6 +96,8 @@ class Dashboard {
             sec.classList.remove('active');
         });
         // Fix: ensure all-users-section is activated properly
+
+
         if (section === 'all-users') {
             const allUsersSection = document.getElementById('all-users-section');
             if (allUsersSection) allUsersSection.classList.add('active');
@@ -108,7 +110,8 @@ class Dashboard {
             users: 'Driver Management',
             shops: 'Shop Management',
             categories: 'Category Management',
-            announcements: 'Announcements Management',
+            announcements: 'Announcements (Shops)',
+            'driver-announcements': 'Announcements (Drivers)',
             logs: 'Admin Access Logs',
             'all-users': 'All Users'
         };
@@ -131,7 +134,9 @@ class Dashboard {
         } else if (section === 'categories') {
             this.loadCategories();
         } else if (section === 'announcements') {
-            loadAnnouncements(); // Use global function
+            loadAnnouncements(); // Shops
+        } else if (section === 'driver-announcements') {
+            loadDriverAnnouncements(); // Drivers
         } else if (section === 'logs') {
             this.loadLogs();
         } else if (section === 'all-users') {
@@ -141,14 +146,17 @@ class Dashboard {
 
     async loadAllData() {
         try {
+            console.log('🔄 Starting to load all dashboard data...');
             await Promise.all([
                 this.loadUsers(),
                 this.loadShops()
             ]);
+            console.log('✅ All data loaded, updating stats...');
             this.updateStats();
             this.renderRecentItems();
+            console.log('✅ Dashboard data loading complete');
         } catch (error) {
-            console.error('Error loading dashboard data:', error);
+            console.error('❌ Error loading dashboard data:', error);
             this.showToast('Failed to load dashboard data', 'error');
         }
     }
@@ -374,22 +382,29 @@ class Dashboard {
 
     async loadUsers() {
         try {
-            console.log('Loading users...');
+            console.log('📊 Loading users from /api/admin/users...');
             const response = await fetch('/api/admin/users');
+            console.log('📊 Users API response status:', response.status);
+
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error('📊 Users API error response:', errorText);
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
+
             const result = await response.json();
+            console.log('📊 Users API result:', result);
+
             if (result.success) {
-                this.users = result.users;
-                console.log('Users loaded successfully:', this.users.length);
+                this.users = result.users || [];
+                console.log('✅ Users loaded successfully:', this.users.length, 'users');
                 // Always render users after loading
                 if (this.currentSection === 'all-users') this.renderUsers();
             } else {
                 throw new Error(result.message || 'Failed to load users');
             }
         } catch (error) {
-            console.error('Error loading users:', error);
+            console.error('❌ Error loading users:', error);
             this.showToast('Failed to load users: ' + error.message, 'error');
             this.users = [];
         }
@@ -398,10 +413,14 @@ class Dashboard {
     async loadShops() {
         // First, load shop_accounts for dashboard stats
         try {
-            console.log('Loading shop accounts...');
+            console.log('📊 Loading shop accounts from /api/admin/shop-accounts...');
             const shopAccountsRes = await fetch('/api/admin/shop-accounts');
+            console.log('📊 Shop accounts API response status:', shopAccountsRes.status);
+
             if (shopAccountsRes.ok) {
                 const shopAccountsData = await shopAccountsRes.json();
+                console.log('📊 Shop accounts API result:', shopAccountsData);
+
                 if (shopAccountsData.success && Array.isArray(shopAccountsData.shopAccounts)) {
                     this.shops = shopAccountsData.shopAccounts;
                     console.log('Shop accounts loaded successfully:', this.shops.length);
@@ -503,12 +522,22 @@ class Dashboard {
     }
 
     updateStats() {
+        console.log('📈 Updating dashboard stats...');
+        console.log('📈 Users data:', this.users.length, 'users');
+        console.log('📈 Shops data:', this.shops.length, 'shops');
+
         // Update overview stats - only count drivers from users table
         const driverCount = this.users.filter(u => u.user_type === 'driver').length;
         const activeShopCount = this.shops.filter(s => s.status === 'active').length;
 
-        document.getElementById('total-users').textContent = driverCount;
-        document.getElementById('total-shops').textContent = activeShopCount;
+        console.log('📈 Calculated stats - Drivers:', driverCount, 'Active Shops:', activeShopCount);
+
+        const totalUsersEl = document.getElementById('total-users');
+        const totalShopsEl = document.getElementById('total-shops');
+        const todayRegsEl = document.getElementById('today-registrations');
+
+        if (totalUsersEl) totalUsersEl.textContent = driverCount;
+        if (totalShopsEl) totalShopsEl.textContent = activeShopCount;
 
         // Calculate today's registrations
         const today = new Date().toDateString();
@@ -519,7 +548,12 @@ class Dashboard {
             new Date(shop.created_at).toDateString() === today
         ).length;
 
-        document.getElementById('today-registrations').textContent = todayDrivers + todayShops;
+        const todayTotal = todayDrivers + todayShops;
+        console.log('📈 Today registrations - Drivers:', todayDrivers, 'Shops:', todayShops, 'Total:', todayTotal);
+
+        if (todayRegsEl) todayRegsEl.textContent = todayTotal;
+
+        console.log('✅ Stats updated successfully');
     }
 
     renderRecentItems() {
@@ -3651,114 +3685,230 @@ function openAnnouncementViewsModal(announcementId) {
             return s ? (s.shop_name || s.name || s.store_name || `Shop ${sid}`) : `Shop ${sid}`;
         };
 
-        const listItems = entries
-            .sort((a,b)=> (b[1]?.ts||0) - (a[1]?.ts||0))
-            .map(([sid, info]) => {
-                const when = info?.ts ? new Date(info.ts).toLocaleString() : '';
-                return `<li style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border);">
-                            <span style=\"color:var(--text-primary);\">${nameFor(sid)}</span>
-                            <span style=\"font-size:12px; color:var(--text-secondary);\">${when}</span>
-                        </li>`;
-            }).join('') || `<div style=\"color:var(--text-secondary); padding:8px 0;\">No shops have viewed this announcement yet.</div>`;
+        const items = entries.map(([shopId, ts]) => `
+            <div class="view-item">
+                <div class="view-left">
+                    <div class="view-avatar"><i class="fas fa-store"></i></div>
+                    <div class="view-info">
+                        <div class="view-name">${nameFor(shopId)}</div>
+                        <div class="view-date">Viewed at ${new Date(ts).toLocaleString()}</div>
+                    </div>
+                </div>
+            </div>`).join('');
 
         overlay.innerHTML = `
-            <div class="modal" style="max-width:600px;">
+            <div class="modal" style="max-width:720px;">
                 <div class="modal-header">
-                    <h3><i class="fas fa-eye"></i> Seen by ${entries.length} shop(s)</h3>
+                    <h3><i class="fas fa-eye"></i> Viewed by Shops (${entries.length})</h3>
                     <button class="modal-close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <ul style="list-style:none; margin:0; padding:0;">${listItems}</ul>
+                    ${items ? `<div class="viewer-list" style="display:flex; flex-direction:column; gap:12px;">
+                        ${items}
+                    </div>` : '<div class="empty-state"><i class="fas fa-inbox"></i><h3>No Views Yet</h3><p>No shops have viewed this announcement yet.</p></div>'}
                 </div>
             </div>`;
-
+        overlay.querySelector('.modal-close').addEventListener('click', () => { overlay.remove(); document.body.style.overflow = 'auto'; });
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
-
-        // Wire close button
-        const closeBtn = overlay.querySelector('.modal-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                overlay.remove();
-                document.body.style.overflow = 'auto';
-            });
-        }
     } catch (e) {
-        console.error('Failed to open views modal', e);
+        console.error('Error opening announcement views modal:', e);
     }
 }
 
 
-// Initialize dashboard when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
+// ==== Driver Announcements (separate storage and UI) ====
+function openDriverAnnouncementModal() {
+    const modal = document.getElementById('driver-announcement-modal');
+    if (!modal) return;
+    document.getElementById('driver-announcement-form').reset();
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeDriverAnnouncementModal() {
+    const modal = document.getElementById('driver-announcement-modal');
+    if (!modal) return;
+    modal.classList.remove('active');
+    document.body.style.overflow = 'auto';
+}
+
+function saveDriverAnnouncement(event) {
+    event.preventDefault();
     try {
-        console.log('Initializing dashboard...');
-        window.dashboard = new Dashboard();
-        console.log('Dashboard initialized successfully');
-    } catch (error) {
-        console.error('Error initializing dashboard:', error);
-        // Create a minimal dashboard instance as fallback
-        window.dashboard = {
-            openShopModal: () => {
-                console.error('Dashboard not properly initialized');
-                alert('Dashboard is not properly loaded. Please refresh the page.');
-            },
-            openAnnouncementModal: openAnnouncementModal,
-            showToast: (message, type) => {
-                console.log(`Toast (${type}): ${message}`);
-            }
+        const form = document.getElementById('driver-announcement-form');
+        const message = document.getElementById('driver-announcement-message').value.trim();
+        const importance = document.getElementById('driver-announcement-importance').value;
+        if (!message || !importance) return;
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        submitBtn.disabled = true;
+
+        const existing = JSON.parse(localStorage.getItem('driver_announcements') || '[]');
+        const newId = existing.length ? Math.max(...existing.map(a => a.id || 0)) + 1 : 1;
+        const announcement = {
+            id: newId,
+            message,
+            importance,
+            created_at: new Date().toISOString()
         };
-    }
+        existing.push(announcement);
+        localStorage.setItem('driver_announcements', JSON.stringify(existing));
 
-    // Modal UX bindings
-    const overlay = document.getElementById('announcement-modal');
-    if (overlay) {
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) closeAnnouncementModal();
-        });
-    }
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeAnnouncementModal();
-    });
+        // reset and close
+        form.reset();
+        closeDriverAnnouncementModal();
 
-    // Live update listeners (announcements + views)
-    window.addEventListener('storage', (e) => {
-        if (['announcements','announcements_updated_at','announcement_views','announcement_views_updated_at'].includes(e.key)) {
-            try { loadAnnouncements(); } catch (_) {}
-        }
-    });
-    try {
-        if (window.BroadcastChannel) {
-            const bc1 = new BroadcastChannel('announcements');
-            bc1.onmessage = (ev) => { if (ev?.data?.type === 'updated') { try { loadAnnouncements(); } catch(_){} } };
-            const bc2 = new BroadcastChannel('announcement_views');
-            bc2.onmessage = (ev) => { if (ev?.data?.type === 'updated') { try { loadAnnouncements(); } catch(_){} } };
-            window._annChannels = [bc1, bc2];
-        }
-    } catch (e) { console.warn('BroadcastChannel not available', e); }
-});
+        // Broadcast to other tabs
+        try { new BroadcastChannel('driver_announcements_channel').postMessage({ type: 'updated' }); } catch (_) {}
 
-// Fallback: Ensure dashboard is available even if DOMContentLoaded already fired
-if (document.readyState === 'loading') {
-    // DOM is still loading, wait for DOMContentLoaded
-} else {
-    // DOM is already loaded, initialize immediately
-    if (!window.dashboard) {
-        try {
-            console.log('DOM already loaded, initializing dashboard immediately...');
-            window.dashboard = new Dashboard();
-            console.log('Dashboard initialized successfully (late init)');
-        } catch (error) {
-            console.error('Error in late dashboard initialization:', error);
-            window.dashboard = {
-                openShopModal: () => {
-                    console.error('Dashboard not properly initialized');
-                    alert('Dashboard is not properly loaded. Please refresh the page.');
-                },
-                showToast: (message, type) => {
-                    console.log(`Toast (${type}): ${message}`);
-                }
-            };
-        }
+        setTimeout(() => {
+            alert('Driver announcement created successfully!');
+            loadDriverAnnouncements();
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }, 250);
+    } catch (e) {
+        console.error('Error creating driver announcement:', e);
+        alert('Failed to create driver announcement.');
+        const submitBtn = document.querySelector('#driver-announcement-form button[type="submit"]');
+        if (submitBtn) { submitBtn.innerHTML = 'Save Announcement'; submitBtn.disabled = false; }
     }
 }
+
+function loadDriverAnnouncements() {
+    try {
+        let announcements = JSON.parse(localStorage.getItem('driver_announcements') || '[]');
+        announcements.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        renderDriverAnnouncements(announcements);
+    } catch (e) {
+        console.error('Error loading driver announcements:', e);
+        renderDriverAnnouncements([]);
+    }
+}
+
+function renderDriverAnnouncements(announcements) {
+    const grid = document.getElementById('driver-announcements-grid');
+    if (!grid) return;
+    if (!announcements || announcements.length === 0) {
+        grid.innerHTML = `
+            <div class="announcements-empty">
+                <i class="fas fa-bullhorn"></i>
+                <h3>No Driver Announcements</h3>
+                <p>Click "Add Driver Announcement" to create one.</p>
+            </div>`;
+        return;
+    }
+    const views = JSON.parse(localStorage.getItem('driver_announcement_views') || '{}');
+    grid.innerHTML = announcements.map((a, idx) => {
+        const created = new Date(a.created_at);
+        const date = created.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        const time = created.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const icon = { high: 'exclamation-triangle', medium: 'info-circle', low: 'info' }[a.importance] || 'info';
+        const viewCount = views[a.id] ? Object.keys(views[a.id]).length : 0;
+        return `
+            <div class="announcement-card ${a.importance}">
+                <div class="announcement-header">
+                    <h3 class="announcement-title">Driver Announcement #${idx + 1}</h3>
+                    <div class="announcement-actions">
+                        <button class="action-btn" title="Seen by drivers" onclick="openDriverAnnouncementViewsModal(${a.id})" style="gap:6px; display:inline-flex; align-items:center;">
+                            <i class="fas fa-eye"></i>
+                            <span style="font-size:12px; color:var(--text-secondary);">${viewCount}</span>
+                        </button>
+                        <button class="action-btn delete" onclick="deleteDriverAnnouncement(${a.id})" title="Delete announcement">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="announcement-content" onclick="openDriverAnnouncementViewsModal(${a.id})" style="cursor:pointer;">
+                    <p class="announcement-message">${a.message}</p>
+                    <div class="announcement-meta">
+                        <span class="announcement-date"><i class="fas fa-calendar"></i> Made: ${date} ${time}</span>
+                        <span class="announcement-importance ${a.importance}"><i class="fas fa-${icon}"></i> ${a.importance.charAt(0).toUpperCase() + a.importance.slice(1)} Importance</span>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function deleteDriverAnnouncement(id) {
+    if (!confirm('Delete this driver announcement?')) return;
+    try {
+        const existing = JSON.parse(localStorage.getItem('driver_announcements') || '[]');
+        const updated = existing.filter(a => a.id !== id);
+        localStorage.setItem('driver_announcements', JSON.stringify(updated));
+        alert('Driver announcement deleted.');
+        loadDriverAnnouncements();
+    } catch (e) {
+        console.error('Error deleting driver announcement:', e);
+        alert('Failed to delete driver announcement.');
+    }
+}
+
+function openDriverAnnouncementViewsModal(announcementId) {
+    try {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); document.body.style.overflow = 'auto'; } });
+        const viewsMap = JSON.parse(localStorage.getItem('driver_announcement_views') || '{}');
+        const entries = Object.entries(viewsMap[announcementId] || {});
+        const users = (window.dashboard && window.dashboard.users) ? window.dashboard.users.filter(u => u.user_type === 'driver') : [];
+        const nameFor = (uid) => {
+            const u = users.find(x => String(x.id) === String(uid));
+            return u ? (u.name || u.email || `Driver ${uid}`) : `Driver ${uid}`;
+        };
+        const items = entries.map(([driverId, ts]) => `
+            <div class="view-item">
+                <div class="view-left">
+                    <div class="view-avatar"><i class="fas fa-user"></i></div>
+                    <div class="view-info">
+                        <div class="view-name">${nameFor(driverId)}</div>
+                        <div class="view-date">Viewed at ${new Date(ts).toLocaleString()}</div>
+                    </div>
+                </div>
+            </div>`).join('');
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:720px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-eye"></i> Viewed by Drivers (${entries.length})</h3>
+                    <button class="modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    ${items ? `<div class="viewer-list" style="display:flex; flex-direction:column; gap:12px;">
+                        ${items}
+                    </div>` : '<div class="empty-state"><i class="fas fa-inbox"></i><h3>No Views Yet</h3><p>No drivers have viewed this announcement yet.</p></div>'}
+                </div>
+            </div>`;
+        overlay.querySelector('.modal-close').addEventListener('click', () => { overlay.remove(); document.body.style.overflow = 'auto'; });
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden';
+    } catch (e) {
+        console.error('Error opening driver announcement views modal:', e);
+    }
+}
+
+
+// Expose Dashboard class and Driver Announcements helpers globally
+if (typeof window !== 'undefined') {
+    window.Dashboard = Dashboard;
+    window.openDriverAnnouncementModal = openDriverAnnouncementModal;
+    window.closeDriverAnnouncementModal = closeDriverAnnouncementModal;
+    window.saveDriverAnnouncement = saveDriverAnnouncement;
+    window.loadDriverAnnouncements = loadDriverAnnouncements;
+    window.renderDriverAnnouncements = renderDriverAnnouncements;
+    window.deleteDriverAnnouncement = deleteDriverAnnouncement;
+    window.openDriverAnnouncementViewsModal = openDriverAnnouncementViewsModal;
+
+    console.log('✅ Dashboard class and helpers exposed globally');
+    console.log('Dashboard available:', typeof window.Dashboard);
+}
+
+
+
+
+
+
+// Dashboard class is now available globally
+// It will be instantiated by the login script when needed

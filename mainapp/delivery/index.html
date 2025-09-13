@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Padoo Delivery - Driver Dashboard</title>
-    
+
     <!-- PWA Meta Tags -->
     <meta name="description" content="Driver dashboard for delivery management system">
     <meta name="theme-color" content="#10b981">
@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="Driver App">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="application-name" content="Driver App">
-    
+
     <!-- Mobile App Switcher -->
     <meta name="format-detection" content="telephone=no">
     <meta name="msapplication-TileColor" content="#10b981">
@@ -21,7 +21,7 @@
     <meta name="msapplication-tap-highlight" content="no">
     <meta name="apple-touch-fullscreen" content="yes">
     <meta name="apple-mobile-web-app-oriented" content="portrait">
-    
+
     <!-- Prevent browser branding in app switcher -->
     <meta name="mobile-web-app-title" content="Driver App">
     <meta name="apple-mobile-web-app-title" content="Driver App">
@@ -29,28 +29,28 @@
     <meta name="msapplication-starturl" content="/app">
     <meta name="msapplication-navbutton-color" content="#10b981">
     <meta name="msapplication-window" content="width=1024;height=768">
-    
+
     <!-- Android Chrome -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#10b981">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#059669">
-    
+
     <!-- Force standalone mode -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="msapplication-navbutton-color" content="#10b981">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-status-bar-style" content="black-translucent">
-    
+
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
-    
+
     <!-- Icons -->
     <link rel="icon" href="/plogo.png">
     <link rel="apple-touch-icon" href="/plogo.png">
-    
+
     <!-- Standalone Mode Styles -->
     <link rel="stylesheet" href="/standalone-mode.css">
-    
+
     <!-- CSS Files with Cache Busting -->
     <link rel="stylesheet" href="/mainapp/delivery/css/styles.css?v=2025090401">
     <link rel="stylesheet" href="/mainapp/delivery/css/home.css?v=2025090401">
@@ -59,7 +59,7 @@
     <link rel="stylesheet" href="/mainapp/delivery/css/profile.css?v=2025090401">
     <link rel="stylesheet" href="/mainapp/delivery/css/modals.css?v=2025090401">
     <link rel="stylesheet" href="/mainapp/delivery/css/notifications.css?v=2025090401">
-    
+
     <!-- External CSS -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -164,7 +164,7 @@
                 </div>
             </div>
         </header>
-        
+
         <!-- Home Page -->
         <div id="home-page" class="page active">
             <div class="page-header">
@@ -176,7 +176,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Quick Stats -->
             <div class="quick-stats">
                 <div class="stat-card earnings">
@@ -188,7 +188,7 @@
                         <p data-translate="totalEarnings">Total Earnings</p>
                     </div>
                 </div>
-                
+
                 <div class="stat-card orders">
                     <div class="stat-icon">
                         <i class="fas fa-box"></i>
@@ -198,7 +198,7 @@
                         <p data-translate="totalOrders">Total Orders</p>
                     </div>
                 </div>
-                
+
                 <div class="stat-card today">
                     <div class="stat-icon">
                         <i class="fas fa-calendar-day"></i>
@@ -208,7 +208,7 @@
                         <p data-translate="todaysOrders">Today's Orders</p>
                     </div>
                 </div>
-                
+
                 <div class="stat-card shops">
                     <div class="stat-icon">
                         <i class="fas fa-store"></i>
@@ -219,7 +219,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Quick Actions -->
             <div class="quick-actions">
                 <h3 class="section-title">
@@ -236,11 +236,11 @@
                             <p data-translate="recordDelivery">Record a new delivery order</p>
                         </div>
                     </div>
-                    
+
 
                 </div>
             </div>
-            
+
             <!-- Recent Activity -->
             <div class="recent-activity-section">
                 <h3 class="section-title">
@@ -262,13 +262,13 @@
                     <button class="filter-btn" data-filter="month" data-translate="month">This Month</button>
                 </div>
             </div>
-            
+
             <div id="orders-container"></div>
         </div>
 
         <!-- Notifications Page -->
         <div id="notifications-page" class="page">
-            
+
             <div class="notifications-container">
                 <div id="notifications-list" class="notifications-list">
                     <div class="loading">
@@ -276,7 +276,7 @@
                         <span data-translate="loading">Loading notifications...</span>
                     </div>
                 </div>
-                
+
                 <div id="no-notifications" class="no-data-message" style="display: none;">
                     <i class="fas fa-bell-slash"></i>
                     <h3 data-translate="noNotifications">No Notifications</h3>
@@ -304,6 +304,32 @@
                 <!-- Profile content will be loaded here -->
             </div>
         </div>
+
+        <!-- Driver Announcements Page -->
+        <div id="driver-announcements-page" class="page">
+            <div class="page-header">
+                <div class="header-content">
+                    <h2><i class="fas fa-bullhorn"></i> Announcements</h2>
+                </div>
+            </div>
+            <div class="announcements-container">
+                <div id="driver-announcements-list"></div>
+            </div>
+        </div>
+
+        <!-- Driver Analytics Page -->
+        <div id="driver-analytics-page" class="page">
+            <div class="page-header">
+                <div class="header-content">
+                    <h2><i class="fas fa-chart-line"></i> Analytics</h2>
+                </div>
+            </div>
+            <div class="analytics-container">
+                <div id="driver-analytics-controls"></div>
+                <div id="driver-analytics-summary"></div>
+            </div>
+        </div>
+
 
         <!-- Enhanced Modern Bottom Navigation -->
         <div class="bottom-nav" style="
@@ -480,12 +506,12 @@
     <!-- Translation System -->
     <script src="/mainapp/delivery/js/translations.js"></script>
     <script src="/mainapp/delivery/js/app.js"></script>
-    
+
     <!-- Standalone Mode Enforcer -->
     <script src="/standalone-enforcer.js"></script>
     <script src="/standalone-detector.js"></script>
-    
+
     <!-- PWA Script -->
     <script src="/pwa-utils.js"></script>
 </body>
-</html> 
+</html>

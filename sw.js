@@ -283,17 +283,7 @@ async function playNotificationSound(notificationData) {
       // Multiple notification attempts for reliability
       const soundPromises = [];
 
-      // Method 1: Try to wake up the main app to play sound
-      const clients = await self.clients.matchAll({ includeUncontrolled: true });
-      clients.forEach(client => {
-        soundPromises.push(
-          client.postMessage({
-            type: 'play_notification_sound',
-            strong: true,
-            notificationData: notificationData
-          })
-        );
-      });
+      // Method 1 removed to avoid duplicate in-app sounds; rely on SW sound only
 
       // Method 2: Use Web Audio API in service worker (if supported)
       if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {

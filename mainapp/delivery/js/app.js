@@ -338,7 +338,26 @@ class DeliveryApp {
         try {
             if (!this.smartMemory || !this.smartMemory[dataType]) return;
             const memory = this.smartMemory[dataType];
-            memory.data.unshift(item); // Add to beginning
+
+            if (dataType === 'notifications') {
+                // Ensure array
+                if (!Array.isArray(memory.data)) memory.data = [];
+                // If same ID exists, update in place
+                const byId = memory.data.findIndex(n => n && n.id === item.id);
+                if (byId !== -1) {
+                    memory.data[byId] = { ...memory.data[byId], ...item };
+                } else {
+                    // Remove duplicate pending for same order
+                    if (item && item.order_id) {
+                        const dup = memory.data.findIndex(n => n && n.order_id === item.order_id && n.status === 'pending' && (item.status === 'pending' || !item.status) && n.id !== item.id);
+                        if (dup !== -1) memory.data.splice(dup, 1);
+                    }
+                    memory.data.unshift(item);
+                }
+            } else {
+                memory.data.unshift(item); // default behavior
+            }
+
             memory.lastUpdate = Date.now();
             console.log(`🧠 Added item to ${dataType} memory`);
         } catch (error) {
@@ -754,6 +773,12 @@ class DeliveryApp {
             case 'profile':
                 this.loadProfileData();
                 break;
+            case 'driver-announcements':
+                this.loadDriverAnnouncementsPage();
+                break;
+            case 'driver-analytics':
+                this.renderDriverAnalyticsPage();
+                break;
         }
     }
 
@@ -828,19 +853,65 @@ class DeliveryApp {
     }
 
     updateStats() {
-        const totalEarnings = this.orders.reduce((sum, order) => sum + (parseFloat(order.earnings) || 0), 0);
-        const totalOrders = this.orders.length;
+        // Update Home stats using new driver stats endpoint (lifetime + today)
+        (async () => {
+            const totalOrdersEl = document.getElementById('total-orders');
+            const todayOrdersEl = document.getElementById('today-orders');
+            const totalEarningsEl = document.getElementById('total-earnings');
+            const totalShopsEl = document.getElementById('total-shops');
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (this.sessionToken) headers['Authorization'] = `Bearer ${this.sessionToken}`;
 
-        const today = new Date().toDateString();
-        const todayOrders = this.orders.filter(order => {
-            const orderDate = new Date(order.created_at).toDateString();
-            return orderDate === today;
-        }).length;
+                // 1) Try lifetime stats endpoint
+                const r1 = await fetch(`/api/driver/${this.userId}/stats`, { headers });
+                if (r1.ok) {
+                    const result = await r1.json();
+                    if (result && result.success && result.stats) {
+                        const s = result.stats;
+                        if (todayOrdersEl) todayOrdersEl.textContent = Number(s.today_orders || 0);
+                        if (totalOrdersEl) totalOrdersEl.textContent = Number(s.total_orders || 0);
+                        if (totalEarningsEl) totalEarningsEl.textContent = `€${Number(s.total_earnings || 0).toFixed(2)}`;
+                        if (totalShopsEl) totalShopsEl.textContent = this.shops.length;
+                        return;
+                    }
+                }
 
-        document.getElementById('total-earnings').textContent = `$${totalEarnings.toFixed(2)}`;
-        document.getElementById('total-orders').textContent = totalOrders;
-        document.getElementById('today-orders').textContent = todayOrders;
-        document.getElementById('total-shops').textContent = this.shops.length;
+                // 2) Fallback to daily analytics for today (if stats route not available)
+                const d = new Date();
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const dateStr = `${y}-${m}-${day}`;
+                const r2 = await fetch(`/api/driver/${this.userId}/analytics?date=${encodeURIComponent(dateStr)}`, { headers });
+                if (r2.ok) {
+                    const result = await r2.json();
+                    if (result && result.success && result.summary) {
+                        const s = result.summary;
+                        if (todayOrdersEl) todayOrdersEl.textContent = Number(s.total_orders || 0);
+                        if (totalOrdersEl) totalOrdersEl.textContent = Number(s.total_orders || 0);
+                        if (totalEarningsEl) totalEarningsEl.textContent = `€${Number(s.total_earnings || 0).toFixed(2)}`;
+                        if (totalShopsEl) totalShopsEl.textContent = this.shops.length;
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load driver stats; falling back to local:', e);
+            }
+
+            // 3) Final fallback to local personal orders
+            const totalEarnings = this.orders.reduce((sum, order) => sum + (parseFloat(order.earnings) || 0), 0);
+            const totalOrders = this.orders.length;
+            const today = new Date().toDateString();
+            const todayOrders = this.orders.filter(order => {
+                const orderDate = new Date(order.created_at).toDateString();
+                return orderDate === today;
+            }).length;
+            if (totalEarningsEl) totalEarningsEl.textContent = `€${totalEarnings.toFixed(2)}`;
+            if (totalOrdersEl) totalOrdersEl.textContent = totalOrders;
+            if (todayOrdersEl) todayOrdersEl.textContent = todayOrders;
+            if (totalShopsEl) totalShopsEl.textContent = this.shops.length;
+        })();
     }
 
     updateRecentActivity() {
@@ -1982,7 +2053,7 @@ class DeliveryApp {
             if (view === 'active') {
                 pageHeader.textContent = 'Active Orders';
             } else {
-                pageHeader.textContent = 'History';
+                pageHeader.textContent = 'History (Last 24h)';
             }
         }
 
@@ -2034,9 +2105,18 @@ class DeliveryApp {
             return;
         }
 
+        // Compute per-day numbering for today's orders (based on created_at)
+        const start = new Date(); start.setHours(0,0,0,0);
+        const end = new Date(); end.setHours(23,59,59,999);
+        const todays = (acceptedOrders || []).filter(o => {
+            const t = new Date(o.created_at);
+            return !isNaN(t) && t >= start && t <= end;
+        }).sort((a,b)=> new Date(a.created_at) - new Date(b.created_at));
+        const dayIndexMap = new Map(); todays.forEach((o,i)=> dayIndexMap.set(o.id, i+1));
+
         const ordersHTML = (activeOrders || [])
             .filter(o => o && o.id && o.created_at)
-            .map(o => { try { return this.createAcceptedOrderCard(o); } catch (e) { console.warn('Skipping corrupt order', o?.id, e); return ''; } })
+            .map(o => { try { return this.createAcceptedOrderCard({ ...o, _displayIndex: dayIndexMap.get(o.id) }); } catch (e) { console.warn('Skipping corrupt order', o?.id, e); return ''; } })
             .join('');
         container.innerHTML = ordersHTML;
         this.setupOrderCardClickListeners();
@@ -2048,25 +2128,40 @@ class DeliveryApp {
     // Load History (delivered status)
     async loadHistoryContent(container) {
         const acceptedOrders = await this.loadAcceptedOrders();
-        const historyOrders = acceptedOrders.filter(order => order.status === 'delivered');
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000; // last 24 hours
+        const historyOrders = acceptedOrders.filter(order => {
+            if (!order || order.status !== 'delivered') return false;
+            const ts = new Date(order.delivery_time || order.updated_at || order.created_at).getTime();
+            return !isNaN(ts) && ts >= cutoff;
+        });
 
         if (historyOrders.length === 0) {
             container.innerHTML = `
                 <div class="no-orders-minimal">
                     <i class="fas fa-history"></i>
-                    <span>No completed orders</span>
-                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">Completed deliveries will appear here</p>
+                    <span>No completed orders in the last 24 hours</span>
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">Completed deliveries from the last 24 hours will appear here</p>
                 </div>
             `;
             return;
         }
+
+        // Compute per-day numbering for TODAY'S DELIVERED orders only (by delivery time)
+        const start = new Date(); start.setHours(0,0,0,0);
+        const end = new Date(); end.setHours(23,59,59,999);
+        const todaysDelivered = (acceptedOrders || []).filter(o => {
+            if (!o || o.status !== 'delivered') return false;
+            const t = new Date(o.delivery_time || o.updated_at || o.created_at);
+            return !isNaN(t) && t >= start && t <= end;
+        }).sort((a,b)=> new Date(a.delivery_time || a.updated_at || a.created_at) - new Date(b.delivery_time || b.updated_at || b.created_at));
+        const dayIndexMap = new Map(); todaysDelivered.forEach((o,i)=> dayIndexMap.set(o.id, i+1));
 
         // Progressive rendering to avoid blocking the UI and speed up initial paint
         container.innerHTML = '';
         const chunkSize = 10;
         for (let i = 0; i < historyOrders.length; i += chunkSize) {
             const chunk = historyOrders.slice(i, i + chunkSize);
-            const html = chunk.map(order => this.createAcceptedOrderCard(order)).join('');
+            const html = chunk.map(order => this.createAcceptedOrderCard({ ...order, _displayIndex: dayIndexMap.get(order.id) })).join('');
             container.insertAdjacentHTML('beforeend', html);
             // Yield to the browser to keep UI responsive
             await new Promise(requestAnimationFrame);
@@ -2498,7 +2593,7 @@ class DeliveryApp {
                                 align-items: center;
                                 justify-content: center;
                             ">
-                                <i class="fas fa-shopping-bag" style="color: white; font-size: 14px;"></i>
+                                ${order._displayIndex != null ? `<span style="color: white; font-weight: 800; font-size: 13px;">${order._displayIndex}</span>` : `<i class=\"fas fa-shopping-bag\" style=\"color: white; font-size: 14px;\"></i>`}
                             </div>
                             <div>
                                 <h3 style="
@@ -2701,9 +2796,11 @@ class DeliveryApp {
     async completeOrder(orderId, event) {
         try {
             const button = event?.target;
-            const originalText = button.innerHTML;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Completing...';
-            button.disabled = true;
+            const originalText = button?.innerHTML;
+            if (button) {
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Completing...';
+                button.disabled = true;
+            }
 
             const response = await fetch(`/api/orders/${orderId}/complete`, {
                 method: 'PUT',
@@ -2735,8 +2832,9 @@ class DeliveryApp {
                 this.smartMemory.recentOrders.lastUpdate = 0;
             }
 
-            // Refresh the orders list
+            // Refresh the orders list and stats (live)
             this.renderOrders();
+            this.updateStats();
 
             // Refresh Recent Orders page if currently viewing it
             if (this.currentPage === 'recent') {
@@ -2748,6 +2846,7 @@ class DeliveryApp {
             this.showToast(`Failed to complete order: ${error.message}`, 'error');
 
             // Restore button if still exists
+            const button = event?.target;
             if (button) {
                 button.innerHTML = '<i class="fas fa-check"></i> Complete';
                 button.disabled = false;
@@ -3090,8 +3189,9 @@ class DeliveryApp {
                 this.smartMemory.recentOrders.lastUpdate = 0;
             }
 
-            // Refresh the orders list
+            // Refresh the orders list and stats (live)
             this.renderOrders();
+            this.updateStats();
 
         } catch (error) {
             console.error('Error auto-completing order:', error);
@@ -5912,7 +6012,18 @@ class DeliveryApp {
             new Date(b.created_at) - new Date(a.created_at)
         );
 
-        const liveOrdersCount = notifications.filter(n => n.status === 'pending').length;
+        // Deduplicate pending items by order_id to avoid duplicate live orders
+        const deduped = [];
+        const seen = new Set();
+        for (const n of sortedNotifications) {
+            const key = (n && n.status === 'pending' && n.order_id) ? `pending-${n.order_id}` : `id-${n?.id}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                deduped.push(n);
+            }
+        }
+
+        const liveOrdersCount = deduped.filter(n => n.status === 'pending').length;
 
         // Create modern mobile UI
         pageContainer.innerHTML = `
@@ -6014,7 +6125,7 @@ class DeliveryApp {
                         overflow: hidden;
                         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
                     ">
-                        ${this.renderOrdersList(sortedNotifications)}
+                        ${this.renderOrdersList(deduped)}
                     </div>
                 </div>
             </div>
@@ -7637,6 +7748,77 @@ class DeliveryApp {
                         <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                     </div>
 
+
+                    <!-- Announcements (Drivers) -->
+                    <div onclick="deliveryApp.navigateToPage('driver-announcements')" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 16px 20px;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="
+                            width: 40px;
+                            height: 40px;
+                            background: #f3f4f6;
+                            border-radius: 10px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-right: 16px;
+                        ">
+                            <i class="fas fa-bullhorn" style="color: #6b7280; font-size: 18px;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="
+                                font-size: 16px;
+                                font-weight: 500;
+                                color: #111827;
+                                margin-bottom: 2px;
+                            ">Announcements</div>
+                            <div style="
+                                font-size: 13px;
+                                color: #6b7280;
+                            ">Latest updates from admin</div>
+                        </div>
+                        <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                    </div>
+
+                    <!-- Analytics (Drivers) -->
+                    <div onclick="deliveryApp.navigateToPage('driver-analytics')" style="
+                        display: flex;
+                        align-items: center;
+                        padding: 16px 20px;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="
+                            width: 40px;
+                            height: 40px;
+                            background: #f3f4f6;
+                            border-radius: 10px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin-right: 16px;
+                        ">
+                            <i class="fas fa-chart-line" style="color: #6b7280; font-size: 18px;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="
+                                font-size: 16px;
+                                font-weight: 500;
+                                color: #111827;
+                                margin-bottom: 2px;
+                            ">Analytics</div>
+                            <div style="
+                                font-size: 13px;
+                                color: #6b7280;
+                            ">Daily and monthly performance</div>
+                        </div>
+                        <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                    </div>
+
                     <!-- Account Info -->
                     <div style="
                         display: flex;
@@ -8603,7 +8785,7 @@ class DeliveryApp {
                                 align-items: center;
                                 justify-content: center;
                             ">
-                                <i class="fas fa-shopping-bag" style="color: white; font-size: 14px;"></i>
+                                ${order._displayIndex != null ? `<span style=\"color: white; font-weight: 800; font-size: 13px;\">${order._displayIndex}</span>` : `<i class=\"fas fa-shopping-bag\" style=\"color: white; font-size: 14px;\"></i>`}
                             </div>
                             <div>
                                 <h3 style="
@@ -9098,6 +9280,9 @@ class DeliveryApp {
             this.loadRecentOrdersPage(false);
         }
 
+        // Live update Home stats
+        this.updateStats();
+
         console.log('🧠 Updated order status to delivered in memory and cache');
     }
 
@@ -9241,7 +9426,21 @@ class DeliveryApp {
     handleRealtimeNotification(notification) {
         console.log('🔔 Delivery app received real-time notification:', notification);
 
-        // Check if notification already exists
+        // Defensive: ensure list exists
+        if (!Array.isArray(this.notifications)) this.notifications = [];
+
+        // Remove duplicate pending notification for same order (keep the latest)
+        try {
+            if (notification && notification.order_id) {
+                const dupIdx = this.notifications.findIndex(n => n && n.order_id === notification.order_id && n.status === 'pending' && (notification.status === 'pending' || !notification.status) && n.id !== notification.id);
+                if (dupIdx !== -1) {
+                    console.log('🧹 Removing duplicate pending notification for order', notification.order_id);
+                    this.notifications.splice(dupIdx, 1);
+                }
+            }
+        } catch (_) {}
+
+        // Check if notification already exists by ID
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id);
         if (existingIndex !== -1) {
             // Update the existing notification in place
@@ -9261,7 +9460,7 @@ class DeliveryApp {
             }
         } else {
             // Add as new notification (real-time push)
-        this.notifications.unshift(notification);
+            this.notifications.unshift(notification);
             console.log('➕ Added new notification');
 
         if (this.currentPage === 'notifications') {
@@ -9272,9 +9471,12 @@ class DeliveryApp {
                 }, 100);
         }
 
-            this.playNotificationSound(true); // Use strong sound
-            this.showBrowserNotification(notification); // Single modern notification popup
-        this.fetchNotificationCount();
+            // Avoid duplicate in-app sound/popups when push notifications are enabled
+            if (!this.isPushEnabled()) {
+                this.playNotificationSound(true); // Fallback sound only when push not enabled
+                this.showBrowserNotification(notification); // Fallback in-app popup
+            }
+            this.fetchNotificationCount();
         }
 
         // Update notification count
@@ -9696,6 +9898,12 @@ class DeliveryApp {
             this.showToast('Failed to setup notifications. Please refresh and try again.', 'error');
         }
     }
+
+    // Simple check if push notifications are effectively enabled (permission granted)
+    isPushEnabled() {
+        return (typeof Notification !== 'undefined') && Notification.permission === 'granted';
+    }
+
 
     // Check if browser supports notifications
     checkNotificationSupport() {
@@ -11677,7 +11885,315 @@ class DeliveryApp {
                 }
             }
         });
+
+
+	}
+
+
+    // === Driver Announcements Page ===
+    loadDriverAnnouncementsPage() {
+        const container = document.getElementById('driver-announcements-list');
+        if (!container) return;
+        const announcements = JSON.parse(localStorage.getItem('driver_announcements') || '[]')
+            .sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+        if (announcements.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center; padding:24px; color:#6b7280;">
+                    <i class="fas fa-inbox" style="font-size:28px; margin-bottom:8px;"></i>
+                    <div>No announcements yet</div>
+                </div>`;
+        } else {
+            const viewsMap = JSON.parse(localStorage.getItem('driver_announcement_views') || '{}');
+            container.innerHTML = announcements.map(a => {
+                const created = new Date(a.created_at);
+                const date = created.toLocaleDateString();
+                const time = created.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                const icon = { high: 'exclamation-triangle', medium: 'info-circle', low: 'info' }[a.importance] || 'info';
+                const seen = !!(viewsMap[a.id] && viewsMap[a.id][this.userId]);
+                return `
+                    <div class="announcement-card ${a.importance}" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:12px; margin:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:600; color:#111827;">${seen ? '' : '<span style=\"color:#ef4444; font-size:12px;\">NEW</span>'}</div>
+                            <div style="font-size:12px; color:#6b7280;">${date} ${time}</div>
+                        </div>
+                        <div style="margin:8px 0; color:#374151;">${a.message}</div>
+                        <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:#6b7280;">
+                            <i class="fas fa-${icon}"></i>
+                            <span>${a.importance.charAt(0).toUpperCase() + a.importance.slice(1)} importance</span>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+        // Mark viewed
+        try {
+            const views = JSON.parse(localStorage.getItem('driver_announcement_views') || '{}');
+            for (const a of announcements) {
+                views[a.id] = views[a.id] || {};
+                if (!views[a.id][this.userId]) {
+                    views[a.id][this.userId] = new Date().toISOString();
+                }
+            }
+            localStorage.setItem('driver_announcement_views', JSON.stringify(views));
+            try { new BroadcastChannel('driver_announcements_channel').postMessage({ type: 'views-updated' }); } catch (_) {}
+        } catch (e) { console.warn('Failed to mark driver announcements viewed', e); }
+
+        // Subscribe for updates while on this page
+        this.subscribeDriverAnnouncements();
     }
+
+    subscribeDriverAnnouncements() {
+        if (this._driverAnnSub) return;
+        try {
+            const bc = new BroadcastChannel('driver_announcements_channel');
+            bc.onmessage = (ev) => {
+                if (this.currentPage === 'driver-announcements') {
+                    this.loadDriverAnnouncementsPage();
+                }
+            };
+            this._driverAnnSub = bc;
+        } catch (_) {}
+        window.addEventListener('storage', (e) => {
+            if ((e.key === 'driver_announcements' || e.key === 'driver_announcement_views') && this.currentPage === 'driver-announcements') {
+                this.loadDriverAnnouncementsPage();
+            }
+        });
+    }
+
+    // === Driver Analytics Page ===
+    renderDriverAnalyticsPage() {
+        const controls = document.getElementById('driver-analytics-controls');
+        const summary = document.getElementById('driver-analytics-summary');
+        if (!controls || !summary) return;
+        const today = (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+        const ym = (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+        const view = this.driverAnalyticsView || 'daily';
+        const dateVal = this.driverAnalyticsDate || today;
+        const monthVal = this.driverAnalyticsMonth || ym;
+        controls.innerHTML = `
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:10px;">
+                <label style="font-weight:600; color:#111827;">View:</label>
+                <select id="drv-analytics-view" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+                    <option value="daily" ${view==='daily'?'selected':''}>Daily</option>
+                    <option value="monthly" ${view==='monthly'?'selected':''}>Monthly Report</option>
+                </select>
+                ${view==='monthly'
+                    ? `<input id="drv-analytics-month" type="month" value="${monthVal}" style="padding:8px; border:1px solid #e5e7eb; border-radius:8px;" />`
+                    : `<input id="drv-analytics-date" type="date" value="${dateVal}" style="padding:8px; border:1px solid #e5e7eb; border-radius:8px;" />`
+                }
+                <button id="drv-analytics-refresh" class="btn primary" style="padding:8px 12px; border-radius:8px;">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>`;
+        const bind = () => {
+            const viewSel = document.getElementById('drv-analytics-view');
+            viewSel.onchange = () => { this.driverAnalyticsView = viewSel.value; this.renderDriverAnalyticsPage(); };
+            const refresh = async () => {
+                if ((this.driverAnalyticsView||'daily') === 'monthly') {
+                    const m = document.getElementById('drv-analytics-month').value;
+                    this.driverAnalyticsMonth = m;
+                    await this.loadDriverMonthlyAnalytics(m);
+                    await this.loadDriverAnalyticsOrders(true);
+                } else {
+                    const d = document.getElementById('drv-analytics-date').value;
+                    this.driverAnalyticsDate = d;
+                    await this.loadDriverAnalytics(d);
+                    await this.loadDriverAnalyticsOrders(true);
+                }
+            };
+            const btn = document.getElementById('drv-analytics-refresh');
+            btn.onclick = refresh;
+        };
+        bind();
+        // initial load
+        if (view === 'monthly') {
+            this.loadDriverMonthlyAnalytics(monthVal);
+        } else {
+            this.loadDriverAnalytics(dateVal);
+        }
+
+        // Ensure orders section exists below the summary
+        const summaryParent = summary.parentElement;
+        if (summaryParent && !document.getElementById('driver-analytics-orders-section')) {
+            const section = document.createElement('div');
+            section.id = 'driver-analytics-orders-section';
+            section.innerHTML = `
+                <div style="margin-top: 14px; display:flex; align-items:center; justify-content:space-between;">
+                    <h3 style="margin:0; font-size:16px; color:#111827;"><i class="fas fa-list" style="margin-right:8px;"></i> Orders</h3>
+                    <button id="drv-analytics-orders-refresh" class="btn secondary" style="padding:6px 10px; border-radius:8px; font-size:12px;">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div id="driver-analytics-orders-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+                <div style="display:flex; justify-content:center; margin-top:10px;">
+                    <button id="driver-analytics-load-more" class="btn primary" style="padding:8px 12px; border-radius:8px; min-width:160px;">Load more</button>
+                </div>`;
+            summaryParent.appendChild(section);
+        }
+
+        // Initialize pagination state
+        if (this.driverAnalyticsPageSize == null) this.driverAnalyticsPageSize = 20;
+        if (this.driverAnalyticsOrders == null) this.driverAnalyticsOrders = [];
+        if (this.driverAnalyticsOffset == null) this.driverAnalyticsOffset = 0;
+
+        // Bind refresh and load more
+        const refreshBtn = document.getElementById('drv-analytics-orders-refresh');
+        const loadMoreBtn = document.getElementById('driver-analytics-load-more');
+        if (refreshBtn) refreshBtn.onclick = () => this.loadDriverAnalyticsOrders(true);
+        if (loadMoreBtn) loadMoreBtn.onclick = () => this.loadDriverAnalyticsOrders(false);
+
+        // Load first page
+        this.loadDriverAnalyticsOrders(true);
+
+    }
+
+    async loadDriverAnalytics(date) {
+        const summaryEl = document.getElementById('driver-analytics-summary');
+        if (!summaryEl) return;
+        summaryEl.innerHTML = '<div style="padding:16px; color:#6b7280;">Loading...</div>';
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (this.sessionToken) headers['Authorization'] = `Bearer ${this.sessionToken}`;
+            const resp = await fetch(`/api/driver/${this.userId}/analytics?date=${encodeURIComponent(date)}`, { headers });
+            if (!resp.ok) throw new Error(await resp.text());
+            const { summary } = await resp.json();
+            this.renderDriverAnalyticsSummary(summary);
+        } catch (e) {
+            console.error('Driver analytics load error:', e);
+            summaryEl.innerHTML = '<div style="padding:16px; color:#ef4444;">Failed to load analytics</div>';
+        }
+    }
+
+    async loadDriverMonthlyAnalytics(month) {
+        const summaryEl = document.getElementById('driver-analytics-summary');
+        if (!summaryEl) return;
+        summaryEl.innerHTML = '<div style="padding:16px; color:#6b7280;">Loading...</div>';
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (this.sessionToken) headers['Authorization'] = `Bearer ${this.sessionToken}`;
+            const resp = await fetch(`/api/driver/${this.userId}/analytics/monthly?month=${encodeURIComponent(month)}`, { headers });
+            if (!resp.ok) throw new Error(await resp.text());
+            const { summary } = await resp.json();
+            this.renderDriverMonthlyAnalyticsSummary(summary);
+        } catch (e) {
+            console.error('Driver monthly analytics load error:', e);
+            summaryEl.innerHTML = '<div style="padding:16px; color:#ef4444;">Failed to load analytics</div>';
+        }
+    }
+
+        // Paginated orders under analytics
+        async loadDriverAnalyticsOrders(reset = false) {
+            try {
+                const listEl = document.getElementById('driver-analytics-orders-list');
+                const loadMoreBtn = document.getElementById('driver-analytics-load-more');
+                if (!listEl) return;
+
+                if (reset) {
+                    this.driverAnalyticsOrders = [];
+                    this.driverAnalyticsOffset = 0;
+                    listEl.innerHTML = '<div style="padding:12px; color:#6b7280;">Loading orders...</div>';
+                    if (loadMoreBtn) loadMoreBtn.disabled = true;
+                } else {
+                    if (loadMoreBtn) {
+                        loadMoreBtn.disabled = true;
+                        loadMoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+                    }
+                }
+
+                const headers = { 'Content-Type': 'application/json' };
+                if (this.sessionToken) headers['Authorization'] = `Bearer ${this.sessionToken}`;
+                const limit = this.driverAnalyticsPageSize || 20;
+                const offset = this.driverAnalyticsOffset || 0;
+                const todayStr = (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+                const dateParam = (this.driverAnalyticsView || 'daily') === 'daily' ? (this.driverAnalyticsDate || todayStr) : null;
+                const url = `/api/driver/${this.userId}/accepted-orders?limit=${limit}&offset=${offset}` + (dateParam ? `&date=${encodeURIComponent(dateParam)}` : '');
+                const resp = await fetch(url, { headers });
+                if (!resp.ok) throw new Error(await resp.text());
+                const json = await resp.json();
+                const batch = json.orders || [];
+
+                if (reset) listEl.innerHTML = '';
+                this.driverAnalyticsOrders = (this.driverAnalyticsOrders || []).concat(batch);
+                this.driverAnalyticsOffset = offset + batch.length;
+
+                this.renderDriverAnalyticsOrders(batch, !reset, offset);
+
+                // Toggle Load More
+                if (loadMoreBtn) {
+                    if (batch.length < limit) {
+                        loadMoreBtn.style.display = 'none';
+                    } else {
+                        loadMoreBtn.style.display = 'inline-block';
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.innerHTML = 'Load more';
+                    }
+                }
+            } catch (e) {
+                console.error('Driver analytics orders load error:', e);
+                const listEl = document.getElementById('driver-analytics-orders-list');
+                if (listEl && (!this.driverAnalyticsOrders || this.driverAnalyticsOrders.length === 0)) {
+                    listEl.innerHTML = '<div style="padding:12px; color:#ef4444;">Failed to load orders</div>';
+                }
+                const loadMoreBtn = document.getElementById('driver-analytics-load-more');
+                if (loadMoreBtn) {
+                    loadMoreBtn.disabled = false;
+                    loadMoreBtn.innerHTML = 'Load more';
+                }
+            }
+        }
+
+        renderDriverAnalyticsOrders(batch, append = false, baseIndex = 0) {
+            const listEl = document.getElementById('driver-analytics-orders-list');
+            if (!listEl) return;
+            const html = (batch || [])
+                .filter(o => o && o.id && o.created_at)
+                .map((o, i) => { try { return this.createRecentOrderCard({ ...o, _displayIndex: baseIndex + i + 1 }); } catch (_) { return ''; } })
+                .join('');
+            if (append) {
+                listEl.insertAdjacentHTML('beforeend', html);
+            } else {
+                listEl.innerHTML = html;
+            }
+            // If nothing yet
+            if (!listEl.innerHTML.trim()) {
+                listEl.innerHTML = '<div style="padding:12px; color:#6b7280;">No orders yet</div>';
+            }
+        }
+
+
+    renderDriverAnalyticsSummary(summary) {
+        const el = document.getElementById('driver-analytics-summary');
+        if (!el) return;
+        const kp = (label, val, color) => `<div style="flex:1; min-width:180px; background:#fff; border:1px solid #eee; border-radius:12px; padding:14px;">
+            <div style="font-size:12px; color:#6b7280;">${label}</div>
+            <div style="font-size:22px; font-weight:700; color:${color};">${val}</div>
+        </div>`;
+        const peak = (h => h===null? '—' : `${h}:00 - ${h}:59`)(summary.peak_hour);
+        const topShop = summary.top_shop ? `${summary.top_shop.name} (${summary.top_shop.count})` : '—';
+        el.innerHTML = `<div style="display:flex; gap:12px; flex-wrap:wrap; padding:10px;">
+            ${kp('Total Deliveries', summary.total_orders, '#111827')}
+            ${kp('Earnings (€)', Number(summary.total_earnings).toFixed(2), '#10b981')}
+            ${kp('Peak Hour', peak, '#8b5cf6')}
+            ${kp('Top Shop', topShop, '#ef4444')}
+        </div>`;
+    }
+
+    renderDriverMonthlyAnalyticsSummary(summary) {
+        const el = document.getElementById('driver-analytics-summary');
+        if (!el) return;
+        const kp = (label, val, color) => `<div style="flex:1; min-width:180px; background:#fff; border:1px solid #eee; border-radius:12px; padding:14px;">
+            <div style="font-size:12px; color:#6b7280;">${label}</div>
+            <div style="font-size:22px; font-weight:700; color:${color};">${val}</div>
+        </div>`;
+        const peak = summary.peak_day ? `${summary.peak_day} (${summary.peak_day_count} deliveries)` : '—';
+        const topShop = summary.top_shop ? `${summary.top_shop.name} (${summary.top_shop.count})` : '—';
+        el.innerHTML = `<div style="display:flex; gap:12px; flex-wrap:wrap; padding:10px;">
+            ${kp('Total Deliveries (Month)', summary.total_orders, '#111827')}
+            ${kp('Earnings (€) (Month)', Number(summary.total_earnings).toFixed(2), '#10b981')}
+            ${kp('Peak Day', peak, '#8b5cf6')}
+            ${kp('Top Shop', topShop, '#ef4444')}
+        </div>`;
+    }
+
 
     // Update time displays
     updateTimeDisplays() {

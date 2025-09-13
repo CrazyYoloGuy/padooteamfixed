@@ -2342,24 +2342,52 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                 const amountOrPaid = isPaid ? '💳 Payment: Card (Paid)' : `💰 Amount: €${parseFloat(order_amount).toFixed(2)}`;
                 const orderMessage = `🚚 New Order Available!\n📦 Order #${orderData.id}\n${amountOrPaid}\n📍 ${delivery_address}\n📞 ${customer_phone}\n⏰ ${prepTimeText}\n${customer_name ? `👤 ${customer_name}` : ''}\n${notes ? `📝 ${notes}` : ''}\n\nTap to accept this delivery order.`;
 
-                const notifications = members.map(member => ({
-                    shop_id: parseInt(shopId),
-                    driver_id: member.driver_id,
-                    message: orderMessage,
-                    order_id: orderData.id
-                }));
-
-                const { data: notificationData, error: notificationError } = await supabase
-                    .from('driver_notifications')
-                    .insert(notifications)
-                    .select('id, created_at, message, status, is_read, driver_id');
-
-                if (notificationError) {
-                    console.error('Error creating notifications:', notificationError);
-                    return;
+                // Prevent duplicate notifications for the same order/driver
+                const driverIds = members.map(m => m.driver_id);
+                let existing = [];
+                try {
+                    const { data: existingRows } = await supabase
+                        .from('driver_notifications')
+                        .select('driver_id')
+                        .eq('order_id', orderData.id)
+                        .in('driver_id', driverIds);
+                    existing = existingRows || [];
+                } catch (e) {
+                    console.warn('Duplicate check failed (continuing):', e?.message || e);
                 }
 
+                const existingSet = new Set(existing.map(r => r.driver_id));
+                const notifications = members
+                    .filter(m => !existingSet.has(m.driver_id))
+                    .map(member => ({
+                        shop_id: parseInt(shopId),
+                        driver_id: member.driver_id,
+                        message: orderMessage,
+                        order_id: orderData.id
+                    }));
+
+                let notificationData = [];
+                if (notifications.length > 0) {
+                    const { data: insData, error: notificationError } = await supabase
+                        .from('driver_notifications')
+                        .insert(notifications)
+                        .select('id, created_at, message, status, is_read, driver_id');
+
+                    if (notificationError) {
+                        console.error('Error creating notifications:', notificationError);
+                        return;
+                    }
+                    notificationData = insData || [];
+                } else {
+                    console.log('No new notifications to create (duplicates skipped)');
+                    notificationData = [];
+                }
+
+
                 console.log(`✅ Queued ${notificationData.length} order notifications for team members`);
+
+                // Broadcast immediately and send all push notifications in parallel to reduce latency
+                const pushPromises = [];
                 for (const notification of notificationData) {
                     try {
                         const realtimeNotification = {
@@ -2374,17 +2402,21 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                             shop_name: shopData.shop_name
                         };
                         broadcastToUser(notification.driver_id, 'driver', realtimeNotification);
-                        await sendPushNotification(notification.driver_id, 'driver', {
-                            id: notification.id,
-                            title: `New Order from ${shopData.shop_name}`,
-                            message: `€${order_amount} delivery to ${delivery_address}`,
-                            shop_name: shopData.shop_name,
-                            order_id: orderData.id
-                        });
+                        pushPromises.push(
+                            sendPushNotification(notification.driver_id, 'driver', {
+                                id: notification.id,
+                                title: `New Order from ${shopData.shop_name}`,
+                                message: `€${order_amount} delivery to ${delivery_address}`,
+                                shop_name: shopData.shop_name,
+                                order_id: orderData.id
+                            })
+                        );
                     } catch (pushErr) {
-                        console.error('Push/broadcast failed for notification', notification.id, pushErr);
+                        console.error('Push/broadcast setup failed for notification', notification.id, pushErr);
                     }
                 }
+                // Fire-and-wait in background without blocking order flow; tolerate individual failures
+                await Promise.allSettled(pushPromises);
             } catch (bgErr) {
                 console.error('Background notification processing failed:', bgErr);
             }
@@ -2555,18 +2587,29 @@ app.put('/api/shop/:shopId/orders/:orderId', async (req, res) => {
 app.get('/api/driver/:driverId/accepted-orders', async (req, res) => {
     try {
         const { driverId } = req.params;
-        const { limit = 50, offset = 0 } = req.query;
+        const { limit = 50, offset = 0, date } = req.query;
 
-        console.log(`Loading accepted orders for driver ${driverId}`);
+        console.log(`Loading accepted orders for driver ${driverId}${date ? ` on ${date}` : ''}`);
 
-        // Fetch only required columns to reduce payload
-        const { data, error } = await supabase
+        // Build base query
+        let query = supabase
             .from('shop_orders')
             .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, delivery_time, preparation_time, driver_earnings')
             .eq('driver_id', driverId)
-            .in('status', ['assigned', 'picked_up', 'delivered'])
-            .order('created_at', { ascending: false })
+            .in('status', ['assigned', 'picked_up', 'delivered']);
+
+        // Optional date filter (UTC day window)
+        if (date) {
+            const start = new Date(`${date}T00:00:00.000Z`).toISOString();
+            const end = new Date(new Date(`${date}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000).toISOString();
+            query = query.gte('created_at', start).lt('created_at', end);
+        }
+
+        // Ordering and pagination
+        query = query.order('created_at', { ascending: false })
             .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error loading accepted orders:', error);
@@ -2711,37 +2754,54 @@ app.get('/api/recent-orders', authenticateUser, async (req, res) => {
 let shopCompletedOrdersCache = new Map();
 const SHOP_COMPLETED_ORDERS_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
-// GET /api/shop/:shopId/completed-orders - Get completed orders for a shop (OPTIMIZED)
+// GET /api/shop/:shopId/completed-orders - Get completed orders for a shop (OPTIMIZED, defaults to today)
 app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res) => {
     try {
         const { shopId } = req.params;
-        const { limit = 50, offset = 0 } = req.query;
+        const { limit = 50, offset = 0, date } = req.query;
+
+        // Default to today's date (local) if not provided
+        const toYMD = (d) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+        const selectedDate = date || toYMD(new Date());
+        const startLocal = new Date(`${selectedDate}T00:00:00`);
+        const endLocal = new Date(`${selectedDate}T00:00:00`);
+        endLocal.setDate(endLocal.getDate() + 1);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
 
         const now = Date.now();
-        const cacheKey = `${shopId}_${limit}_${offset}`;
+        const cacheKey = `${shopId}_${selectedDate}_${limit}_${offset}`;
 
-        // Return cached data if fresh (server-side cache per shop)
+        // Return cached data if fresh (server-side cache per shop/date)
         if (shopCompletedOrdersCache.has(cacheKey)) {
             const cached = shopCompletedOrdersCache.get(cacheKey);
             if (now - cached.time < SHOP_COMPLETED_ORDERS_CACHE_TTL) {
-                console.log(`Serving completed orders from server cache for shop ${shopId}`);
+                console.log(`Serving completed orders from server cache for shop ${shopId} on ${selectedDate}`);
                 return res.json({
                     success: true,
                     orders: cached.data,
                     total: cached.data.length,
-                    cached: true
+                    cached: true,
+                    date: selectedDate
                 });
             }
         }
 
-        console.log(`Loading fresh completed orders for shop ${shopId}`);
+        console.log(`Loading fresh completed orders for shop ${shopId} (date: ${selectedDate})`);
 
-        // Fetch completed orders with essential columns only
+        // Fetch completed orders for the day with essential columns only
         const { data, error } = await supabase
             .from('shop_orders')
             .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, delivery_time, driver_earnings')
             .eq('shop_account_id', shopId)
             .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
             .order('created_at', { ascending: false })
             .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
@@ -2780,13 +2840,14 @@ app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res)
         // Cache the results server-side
         shopCompletedOrdersCache.set(cacheKey, { time: now, data: formattedOrders });
 
-        console.log(`Loaded and cached ${formattedOrders.length} completed orders for shop ${shopId}`);
+        console.log(`Loaded and cached ${formattedOrders.length} completed orders for shop ${shopId} (date: ${selectedDate})`);
 
         res.json({
             success: true,
             orders: formattedOrders,
             total: formattedOrders.length,
-            cached: false
+            cached: false,
+            date: selectedDate
         });
 
     } catch (error) {
@@ -2798,6 +2859,429 @@ app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res)
         });
     }
 });
+
+// GET /api/shop/:shopId/analytics - Daily analytics + paginated orders (delivered)
+app.get('/api/shop/:shopId/analytics', authenticateUser, async (req, res) => {
+    try {
+        const { shopId } = req.params;
+        const { date, limit = 20, offset = 0 } = req.query;
+
+        const toYMD = (d) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+        const selectedDate = date || toYMD(new Date());
+        const startLocal = new Date(`${selectedDate}T00:00:00`);
+        const endLocal = new Date(`${selectedDate}T00:00:00`);
+        endLocal.setDate(endLocal.getDate() + 1);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        const pageSize = Math.min(parseInt(limit), 100);
+        const startIdx = parseInt(offset);
+        const endIdx = startIdx + pageSize; // inclusive range to fetch one extra for hasMore
+
+        // Fetch delivered orders for the day (page + 1 for hasMore test)
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, delivery_time, driver_earnings')
+            .eq('shop_account_id', shopId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
+            .order('created_at', { ascending: false })
+            .range(startIdx, endIdx);
+
+        if (error) {
+            console.error('Error loading analytics orders:', error);
+            return res.status(500).json({ success: false, message: 'Failed to load analytics orders' });
+        }
+
+        const ordersAll = data || [];
+
+        // Build summary metrics
+        let totalRevenue = 0;
+        let totalDriverEarnings = 0;
+        const perHour = Array.from({ length: 24 }, () => 0);
+        const driverCount = new Map();
+
+        for (const o of ordersAll) {
+            totalRevenue += parseFloat(o.order_amount || 0);
+            totalDriverEarnings += parseFloat(o.driver_earnings || 0);
+            const hour = new Date(o.created_at).getHours();
+            perHour[hour] = (perHour[hour] || 0) + 1;
+            if (o.driver_id) driverCount.set(o.driver_id, (driverCount.get(o.driver_id) || 0) + 1);
+        }
+
+        // Top driver by delivered count
+        let topDriverId = null, topDriverCount = 0;
+        for (const [id, cnt] of driverCount.entries()) {
+            if (cnt > topDriverCount) { topDriverCount = cnt; topDriverId = id; }
+        }
+
+        // Enrich top driver info if exists
+        let topDriver = null;
+        if (topDriverId) {
+            const { data: d } = await supabase.from('users').select('id, email, name').eq('id', topDriverId).limit(1);
+            if (d && d.length) topDriver = { id: d[0].id, name: d[0].name || 'Driver', email: d[0].email, delivered: topDriverCount };
+        }
+
+        // Prepare paginated slice
+        const hasMore = ordersAll.length > pageSize;
+        const pageOrders = ordersAll.slice(0, pageSize);
+
+        // Batch fetch driver info for page orders
+        const driverIds = Array.from(new Set(pageOrders.map(o => o.driver_id).filter(Boolean)));
+        let driversMap = new Map();
+        if (driverIds.length > 0) {
+            const { data: drivers } = await supabase
+                .from('users')
+                .select('id, email, name')
+                .in('id', driverIds);
+            (drivers || []).forEach(d => {
+                driversMap.set(d.id, { name: d.name || 'Driver', email: d.email });
+            });
+        }
+
+        const formattedPage = pageOrders.map(order => ({
+            ...order,
+            driver_name: driversMap.get(order.driver_id)?.name || 'Driver',
+            driver_email: driversMap.get(order.driver_id)?.email || 'Unknown'
+        }));
+
+        const summary = {
+            date: selectedDate,
+            total_orders: ordersAll.length,
+            total_revenue: Number(totalRevenue.toFixed(2)),
+            total_driver_earnings: Number(totalDriverEarnings.toFixed(2)),
+            per_hour: perHour,
+            top_driver: topDriver
+        };
+
+        res.json({ success: true, summary, orders: formattedPage, nextOffset: startIdx + pageSize, hasMore });
+    } catch (e) {
+        console.error('Analytics error:', e);
+        res.status(500).json({ success: false, message: 'Analytics error' });
+    }
+});
+
+// GET /api/shop/:shopId/analytics/monthly - Monthly summary (delivered)
+app.get('/api/shop/:shopId/analytics/monthly', authenticateUser, async (req, res) => {
+    try {
+        const { shopId } = req.params;
+        const { month } = req.query; // format YYYY-MM
+
+        const now = new Date();
+        const toYM = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthStr = month || toYM(now);
+
+        // Compute start/end of month in local time, then ISO
+        const [yStr, mStr] = monthStr.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10) - 1; // 0-based
+        const startLocal = new Date(y, m, 1, 0, 0, 0);
+        const endLocal = new Date(y, m + 1, 1, 0, 0, 0);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        // Fetch delivered orders for the month
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, shop_account_id, driver_id, order_amount, status, created_at')
+            .eq('shop_account_id', shopId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Monthly analytics query error:', error);
+            return res.status(500).json({ success: false, message: 'Failed to load monthly analytics' });
+        }
+
+        const ordersAll = data || [];
+
+        // Totals
+        let totalRevenue = 0;
+        const driverCount = new Map();
+        const perDay = new Map(); // YYYY-MM-DD -> count
+        const toYMD = (d) => {
+            const dt = new Date(d);
+            const yy = dt.getFullYear();
+            const mm = String(dt.getMonth() + 1).padStart(2, '0');
+            const dd = String(dt.getDate()).padStart(2, '0');
+            return `${yy}-${mm}-${dd}`;
+        };
+
+        for (const o of ordersAll) {
+            totalRevenue += parseFloat(o.order_amount || 0);
+            if (o.driver_id) driverCount.set(o.driver_id, (driverCount.get(o.driver_id) || 0) + 1);
+            const day = toYMD(o.created_at);
+            perDay.set(day, (perDay.get(day) || 0) + 1);
+        }
+
+        // Peak day
+        let peakDay = null;
+        let peakDayCount = 0;
+        for (const [day, cnt] of perDay.entries()) {
+            if (cnt > peakDayCount) { peakDayCount = cnt; peakDay = day; }
+        }
+
+        // Top driver info
+        let topDriverId = null, topDriverCount = 0;
+        for (const [id, cnt] of driverCount.entries()) {
+            if (cnt > topDriverCount) { topDriverCount = cnt; topDriverId = id; }
+        }
+        let topDriver = null;
+        if (topDriverId) {
+            const { data: d } = await supabase.from('users').select('id, email, name').eq('id', topDriverId).limit(1);
+            if (d && d.length) topDriver = { id: d[0].id, name: d[0].name || 'Driver', email: d[0].email, delivered: topDriverCount };
+        }
+
+        const summary = {
+            month: monthStr,
+            total_orders: ordersAll.length,
+            total_revenue: Number(totalRevenue.toFixed(2)),
+            peak_day: peakDay,
+            peak_day_count: peakDayCount,
+            top_driver: topDriver
+        };
+
+        res.json({ success: true, summary });
+    } catch (e) {
+        console.error('Monthly analytics error:', e);
+        res.status(500).json({ success: false, message: 'Monthly analytics error' });
+    }
+});
+
+// GET /api/driver/:driverId/analytics - Daily analytics for a driver
+app.get('/api/driver/:driverId/analytics', authenticateUser, async (req, res) => {
+    try {
+        const { driverId } = req.params;
+        const { date } = req.query; // YYYY-MM-DD
+
+        // Determine local day start/end
+        const now = new Date();
+        const toYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const selectedDate = date || toYMD(now);
+        const [y, m, d] = selectedDate.split('-').map(n => parseInt(n, 10));
+        const startLocal = new Date(y, m - 1, d, 0, 0, 0);
+        const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        // Fetch shop orders delivered by this driver in the date range
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, driver_id, shop_account_id, order_amount, driver_earnings, created_at')
+            .eq('driver_id', driverId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('Driver daily analytics query error:', error);
+            return res.status(500).json({ success: false, message: 'Failed to load driver analytics' });
+        }
+
+        const ordersAll = data || [];
+
+        // Totals and aggregations
+        let totalEarnings = 0;
+        const perHour = new Map();
+        const perShop = new Map();
+        for (const o of ordersAll) {
+            totalEarnings += parseFloat(o.driver_earnings || 0);
+            const dt = new Date(o.created_at);
+            const hour = dt.getHours();
+            perHour.set(hour, (perHour.get(hour) || 0) + 1);
+            if (o.shop_account_id) perShop.set(o.shop_account_id, (perShop.get(o.shop_account_id) || 0) + 1);
+        }
+
+        // Peak hour (by count)
+        let peakHour = null;
+        let peakHourCount = 0;
+        for (const [h, cnt] of perHour.entries()) {
+            if (cnt > peakHourCount) { peakHourCount = cnt; peakHour = h; }
+        }
+
+        // Top shop (by count)
+        let topShopId = null, topShopCount = 0;
+        for (const [sid, cnt] of perShop.entries()) {
+            if (cnt > topShopCount) { topShopCount = cnt; topShopId = sid; }
+        }
+        let topShop = null;
+        if (topShopId) {
+            const { data: s } = await supabase.from('shop_accounts').select('id, shop_name').eq('id', topShopId).limit(1);
+            if (s && s.length) topShop = { id: s[0].id, name: s[0].shop_name, count: topShopCount };
+        }
+
+        const summary = {
+            date: selectedDate,
+            total_orders: ordersAll.length,
+            total_earnings: Number(totalEarnings.toFixed(2)),
+            peak_hour: peakHour,
+            top_shop: topShop
+        };
+
+        res.json({ success: true, summary });
+    } catch (e) {
+        console.error('Driver analytics error:', e);
+        res.status(500).json({ success: false, message: 'Driver analytics error' });
+    }
+});
+
+
+// GET /api/driver/:driverId/stats - Lifetime totals + today's orders
+app.get('/api/driver/:driverId/stats', authenticateUser, async (req, res) => {
+    try {
+        const { driverId } = req.params;
+
+        // Today window (local day)
+        const now = new Date();
+        const toYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const selectedDate = toYMD(now);
+        const [y, m, d] = selectedDate.split('-').map(n => parseInt(n, 10));
+        const startLocal = new Date(y, m - 1, d, 0, 0, 0);
+        const endLocal = new Date(y, m - 1, d + 1, 0, 0, 0);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        // Lifetime delivered orders count
+        const { count: totalOrders, error: cntErr } = await supabase
+            .from('shop_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('driver_id', driverId)
+            .eq('status', 'delivered');
+        if (cntErr) throw cntErr;
+
+        // Lifetime earnings sum (use PostgREST aggregate if available; fallback to JS sum)
+        let totalEarnings = 0;
+        try {
+            const { data: agg, error: aggErr } = await supabase
+                .from('shop_orders')
+                .select('driver_earnings_sum:driver_earnings.sum()')
+                .eq('driver_id', driverId)
+                .eq('status', 'delivered')
+                .maybeSingle();
+            if (aggErr) throw aggErr;
+            if (agg && (agg.driver_earnings_sum != null)) totalEarnings = Number(agg.driver_earnings_sum) || 0;
+        } catch (_) {
+            const { data: rows } = await supabase
+                .from('shop_orders')
+                .select('driver_earnings')
+                .eq('driver_id', driverId)
+                .eq('status', 'delivered');
+            totalEarnings = (rows || []).reduce((s, r) => s + (parseFloat(r.driver_earnings) || 0), 0);
+        }
+
+        // Today's delivered orders count
+        const { count: todayOrders, error: todayErr } = await supabase
+            .from('shop_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('driver_id', driverId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO);
+        if (todayErr) throw todayErr;
+
+        const stats = {
+            total_orders: totalOrders || 0,
+            total_earnings: Number(totalEarnings.toFixed(2)),
+            today_orders: todayOrders || 0,
+        };
+        res.json({ success: true, stats });
+    } catch (e) {
+        console.error('Driver stats error:', e);
+        res.status(500).json({ success: false, message: 'Driver stats error' });
+    }
+});
+
+// GET /api/driver/:driverId/analytics/monthly - Monthly analytics for a driver
+app.get('/api/driver/:driverId/analytics/monthly', authenticateUser, async (req, res) => {
+    try {
+        const { driverId } = req.params;
+        const { month } = req.query; // YYYY-MM
+
+        const now = new Date();
+        const toYM = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthStr = month || toYM(now);
+
+        const [yStr, mStr] = monthStr.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10) - 1;
+        const startLocal = new Date(y, m, 1, 0, 0, 0);
+        const endLocal = new Date(y, m + 1, 1, 0, 0, 0);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, driver_id, shop_account_id, driver_earnings, created_at')
+            .eq('driver_id', driverId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('Driver monthly analytics query error:', error);
+            return res.status(500).json({ success: false, message: 'Failed to load driver monthly analytics' });
+        }
+
+        const ordersAll = data || [];
+
+        let totalEarnings = 0;
+        const perDay = new Map();
+        const perShop = new Map();
+        const toYMD = (d) => {
+            const dt = new Date(d);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        };
+
+        for (const o of ordersAll) {
+            totalEarnings += parseFloat(o.driver_earnings || 0);
+            const day = toYMD(o.created_at);
+            perDay.set(day, (perDay.get(day) || 0) + 1);
+            if (o.shop_account_id) perShop.set(o.shop_account_id, (perShop.get(o.shop_account_id) || 0) + 1);
+        }
+
+        // Peak day
+        let peakDay = null, peakDayCount = 0;
+        for (const [day, cnt] of perDay.entries()) {
+            if (cnt > peakDayCount) { peakDayCount = cnt; peakDay = day; }
+        }
+
+        // Top shop
+        let topShopId = null, topShopCount = 0;
+        for (const [sid, cnt] of perShop.entries()) {
+            if (cnt > topShopCount) { topShopCount = cnt; topShopId = sid; }
+        }
+        let topShop = null;
+        if (topShopId) {
+            const { data: s } = await supabase.from('shop_accounts').select('id, shop_name').eq('id', topShopId).limit(1);
+            if (s && s.length) topShop = { id: s[0].id, name: s[0].shop_name, count: topShopCount };
+        }
+
+        const summary = {
+            month: monthStr,
+            total_orders: ordersAll.length,
+            total_earnings: Number(totalEarnings.toFixed(2)),
+            peak_day: peakDay,
+            peak_day_count: peakDayCount,
+            top_shop: topShop
+        };
+
+        res.json({ success: true, summary });
+    } catch (e) {
+        console.error('Driver monthly analytics error:', e);
+        res.status(500).json({ success: false, message: 'Driver monthly analytics error' });
+    }
+});
+
 // PUT /api/orders/:orderId/complete - Mark order as completed
 app.put('/api/orders/:orderId/complete', async (req, res) => {
     try {
@@ -3964,10 +4448,6 @@ app.patch('/api/user/settings', authenticateUser, async (req, res) => {
             const newSettings = {
                 user_id: req.user.id,
                 earnings_per_order: updates.earnings_per_order || 1.50,
-                notificationSettings: updates.notificationSettings || {
-                    soundEnabled: true,
-                    browserEnabled: false
-                },
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             };
@@ -4002,9 +4482,8 @@ app.patch('/api/user/settings', authenticateUser, async (req, res) => {
         if (updates.earnings_per_order !== undefined) {
             validUpdates.earnings_per_order = parseFloat(updates.earnings_per_order);
         }
-        if (updates.notificationSettings !== undefined) {
-            validUpdates.notificationSettings = updates.notificationSettings;
-        }
+        // Notification settings not persisted here (column may not exist); ignore in server
+
         if (updates.language !== undefined) {
             // Validate language value
             if (['en', 'gr'].includes(updates.language)) {
@@ -4021,10 +4500,7 @@ app.patch('/api/user/settings', authenticateUser, async (req, res) => {
         const settingsData = {
             user_id: req.user.id,
             earnings_per_order: validUpdates.earnings_per_order || existingSettings?.earnings_per_order || 1.50,
-            notificationSettings: validUpdates.notificationSettings || (existingSettings?.notificationSettings || {
-                soundEnabled: true,
-                browserEnabled: false
-            }),
+
             language: validUpdates.language || existingSettings?.language || 'en',
             updated_at: new Date().toISOString()
         };
@@ -5109,7 +5585,7 @@ async function sendPushNotification(userId, userType, notificationData) {
                     icon: '/icons/icon-192x192.png',
                     badge: '/icons/plogo.png',
                     tag: 'padoo-order-' + (notificationData.id || Date.now()),
-                    url: '/mainapp/delivery',
+                    url: notificationData.url || (userType === 'shop' ? '/mainapp/shop' : '/mainapp/delivery'),
                     notificationId: notificationData.id,
                     order_amount: notificationData.order_amount,
                     shop_name: notificationData.shop_name,
@@ -5205,15 +5681,74 @@ app.post('/api/orders/accept', authenticateUser, async (req, res) => {
                     .eq('order_id', orderId)
                     .neq('driver_id', driverId);
 
-                // Notify the shop in real-time
+                // Notify the shop in real-time (include driver and order details)
+                let driverUser = null;
+                try {
+                    const { data: du } = await supabase
+                        .from('users')
+                        .select('id, name, email')
+                        .eq('id', driverId)
+                        .maybeSingle();
+                    driverUser = du || null;
+                } catch (_) {}
+
+                // Load driver's default earnings and set on order if missing
+                let defaultEarning = null;
+                try {
+                    const { data: ds } = await supabase
+                        .from('user_settings')
+                        .select('earnings_per_order')
+                        .eq('user_id', driverId)
+                        .maybeSingle();
+                    if (ds && ds.earnings_per_order != null) defaultEarning = parseFloat(ds.earnings_per_order);
+                } catch (e) {
+                    console.warn('Could not fetch driver default earning:', e);
+                }
+                try {
+                    if (!orderData.driver_earnings || Number(orderData.driver_earnings) <= 0) {
+                        const earningToSet = defaultEarning != null ? defaultEarning : 1.50;
+                        await supabase
+                            .from('shop_orders')
+                            .update({ driver_earnings: earningToSet })
+                            .eq('id', orderId);
+                        // reflect for subsequent notifications
+                        orderData.driver_earnings = earningToSet;
+                    }
+                } catch (e) {
+                    console.warn('Could not set driver_earnings on accept (non-fatal):', e);
+                }
+
+
+                const enrichedOrder = {
+                    ...orderData,
+                    users: driverUser || null
+                };
+
                 const shopNotification = {
                     type: 'order_accepted',
-                    orderId: orderId,
-                    driverId: driverId,
+                    orderId,
+                    driverId,
+                    driver: driverUser ? { id: driverUser.id, name: driverUser.name, email: driverUser.email } : null,
+                    order: enrichedOrder,
                     acceptedAt: new Date().toISOString(),
-                    acceptedVia: acceptedVia
+                    acceptedVia
                 };
-                broadcastToUser(orderData.shop_account_id, 'shop', shopNotification);
+                // Important: broadcast to the shop by shopId, not userId
+                broadcastToShop(orderData.shop_account_id, shopNotification);
+
+	                // Also send real push notification to the shop (uses push_subscriptions table)
+	                try {
+	                    const driverLabel = (shopNotification.driver && (shopNotification.driver.name || shopNotification.driver.email)) || 'Driver';
+	                    await sendPushNotification(orderData.shop_account_id, 'shop', {
+	                        id: `accept-${orderId}-${Date.now()}`,
+	                        title: `Order accepted by ${driverLabel}`,
+	                        message: `Order #${orderId} was accepted`,
+	                        order_id: orderId
+	                    });
+	                } catch (pushErr) {
+	                    console.warn('Shop push send failed (non-fatal):', pushErr);
+	                }
+
             } catch (bgErr) {
                 console.error('Background tasks for accept failed:', bgErr);
             }
