@@ -4367,9 +4367,18 @@ class ShopApp {
                     });
                 }
                 // Send subscription to server for this shop
+                // Prefer shop UUID from currentShop; fall back to localStorage only if it looks like a UUID
+                const preferId = this.currentShop?.id || null;
+                const fallbackId = this.shopId || null;
+                const isUUID = (v) => typeof v === 'string' && /^[0-9a-fA-F-]{36}$/.test(v);
+                const userId = isUUID(preferId) ? preferId : (isUUID(fallbackId) ? fallbackId : null);
+                if (!userId) {
+                    console.warn('Shop UUID not available; skipping push subscription registration');
+                    return false;
+                }
                 const body = {
                     subscription,
-                    userId: this.shopId || this.currentShop?.id,
+                    userId,
                     userType: 'shop'
                 };
                 const resp = await fetch('/api/push/subscription', {
@@ -6819,10 +6828,12 @@ class ShopApp {
                     const deliveryTime = new Date(order.delivery_time);
                     const now = new Date();
 
-                    // Only start timer if delivery time is in the future
+                    // Start if in future, otherwise show Ended immediately
                     if (deliveryTime > now) {
                         console.log(`🔄 Shop: Resuming countdown for order ${order.id}`);
                         this.startShopDeliveryCountdown(order.id, deliveryTime);
+                    } else {
+                        this.updateShopCountdownDisplay(order.id, 0, true);
                     }
                 }
             });
@@ -6903,13 +6914,14 @@ class ShopApp {
 
             if (countdownElement) {
                 if (isExpired) {
-                    countdownElement.innerHTML = '<i class="fas fa-check-circle" style="font-size: 12px;"></i> Order Delivered';
-                    countdownElement.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                    countdownElement.innerHTML = '<i class="fas fa-exclamation-circle" style="font-size: 12px;"></i> Deliver Time: Ended';
+                    countdownElement.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                    countdownElement.style.boxShadow = '0 2px 4px rgba(220, 38, 38, 0.2)';
                 } else {
                     const minutes = Math.floor(timeLeft / (1000 * 60));
                     const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
                     const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    countdownElement.innerHTML = `<i class="fas fa-clock" style="font-size: 12px;"></i> Delivery in ${timeString}`;
+                    countdownElement.innerHTML = `<i class=\"fas fa-clock\" style=\"font-size: 12px;\"></i> Delivery in ${timeString}`;
                 }
             }
         }

@@ -27,11 +27,11 @@ class DeliveryApp {
         this.notificationRefreshInterval = null;
         this.timeUpdateInterval = null;
 
+        // Initialize translation system early so UI renders in saved language
+        this.initTranslations();
+
         // Initialize the app
         this.init();
-
-        // Initialize translation system
-        this.initTranslations();
 
 
 
@@ -919,39 +919,45 @@ class DeliveryApp {
         const activityContainer = document.getElementById('recent-activity');
         if (!activityContainer) return;
 
-        // Get last 5 orders only - make sure we have orders first
-        if (!this.orders || this.orders.length === 0) {
+        // Gather last interactions from memory/cache so we can show Accepted / Picked Up / Completed
+        let pool = [];
+        try { if (this.smartMemory?.acceptedOrders?.data) pool = pool.concat(this.smartMemory.acceptedOrders.data); } catch(_){}
+        try { if (this._recentOrdersCache?.data) pool = pool.concat(this._recentOrdersCache.data); } catch(_){}
+        if ((!pool || pool.length === 0) && this.orders && this.orders.length) pool = this.orders;
+
+        const byId = new Map();
+        (pool || []).forEach(o => {
+            if (!o || !o.id) return;
+            const ts = new Date(o.delivery_time || o.delivered_at || o.updated_at || o.picked_up_at || o.assigned_at || o.created_at).getTime() || 0;
+            const prev = byId.get(o.id);
+            if (!prev || ts > prev._ts) byId.set(o.id, { ...o, _ts: ts });
+        });
+
+        const items = Array.from(byId.values()).sort((a,b)=> (b._ts||0) - (a._ts||0)).slice(0,5);
+        if (items.length === 0) {
             activityContainer.innerHTML = `
                 <div class="empty-activity">
-                    <div class="empty-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
+                    <div class="empty-icon"><i class="fas fa-clock"></i></div>
                     <p>No recent activity</p>
-                    <small>Your recent orders will appear here</small>
+                    <small>Your last accept or complete actions will appear here</small>
                 </div>
             `;
             return;
         }
 
-        // Ensure we only take 5 orders maximum
-        const recentOrders = this.orders.slice(0, 5);
-        console.log('Recent orders count:', recentOrders.length, 'Total orders:', this.orders.length);
+        const labelFor = (o) => o.status === 'delivered' ? 'Completed' : (o.status === 'picked_up' ? 'Picked up' : 'Accepted');
+        const iconFor = (o) => o.status === 'delivered' ? 'check-circle' : (o.status === 'picked_up' ? 'shipping-fast' : 'handshake');
+        const colorFor = (o) => o.status === 'delivered' ? '#10b981' : (o.status === 'picked_up' ? '#3b82f6' : '#f59e0b');
 
-        const activityHTML = recentOrders.map(order => `
+        const activityHTML = items.map(o => `
             <div class="activity-item">
-                <div class="activity-icon">
-                        <i class="fas fa-shopping-bag"></i>
-                    </div>
-                    <div class="activity-content">
-                    <div class="activity-title">Order from ${this.getShopName(order)}</div>
-                    <div class="activity-details">
-                        <span class="activity-price">$${parseFloat(order.price).toFixed(2)}</span>
-                        <span class="activity-earnings">+$${parseFloat(order.earnings).toFixed(2)}</span>
-                        </div>
-                    <div class="activity-time">
-                        <i class="fas fa-clock"></i>
-                        ${this.formatTimeAgo(order.created_at)}
-                    </div>
+                <div class="activity-icon" style="background:${colorFor(o)}20; color:${colorFor(o)};">
+                    <i class="fas fa-${iconFor(o)}"></i>
+                </div>
+                <div class="activity-content">
+                    <div class="activity-title">${labelFor(o)}</div>
+                    <div class="activity-sub">Order #${o.id} • ${(this.getShopName ? this.getShopName(o) : (o.shop_name || 'Shop'))}</div>
+                    <div class="activity-time">${this.formatTimeAgo(o.delivery_time || o.updated_at || o.created_at)}</div>
                 </div>
             </div>
         `).join('');
@@ -959,19 +965,12 @@ class DeliveryApp {
         activityContainer.innerHTML = `
             <div class="activity-header">
                 <h4>Recent Activity</h4>
-                <span class="activity-count">${recentOrders.length}</span>
+                <span class="activity-count">${items.length}</span>
             </div>
-            <div class="activity-list">
-                ${activityHTML}
+            <div class="activity-list">${activityHTML}</div>
+            <div class="activity-footer">
+                <button class="view-all-btn" onclick="deliveryApp.navigateToPage('recent')">View All Recent</button>
             </div>
-            ${this.orders.length > 5 ? `
-                <div class="activity-footer">
-                    <button class="view-all-btn" onclick="app.navigateToPage('orders')">
-                        <i class="fas fa-arrow-right"></i>
-                        View All Orders (${this.orders.length})
-                    </button>
-                </div>
-            ` : ''}
         `;
     }
 
@@ -1803,8 +1802,11 @@ class DeliveryApp {
     }
 
     showToast(message, type = 'success') {
-        // Use the new modern notification style for all toasts
-        this.showModernToast(message, type);
+        // Auto-translate toast message if i18n is available
+        const translated = (window.i18n && typeof window.i18n.translateText === 'function')
+            ? window.i18n.translateText(message)
+            : message;
+        this.showModernToast(translated, type);
     }
 
     // Modern toast notification (brief style for all messages)
@@ -1965,7 +1967,7 @@ class DeliveryApp {
                         onmouseout="if('${this.currentOrdersView}' !== 'active') { this.style.background='transparent'; this.style.color='#6b7280'; }"
                     >
                         <i class="fas fa-clock" style="margin-right: 6px;"></i>
-                        Active Orders
+                        ${window.t ? window.t('activeOrders') : 'Active Orders'}
                     </button>
                     <button
                         id="history-tab"
@@ -1986,7 +1988,7 @@ class DeliveryApp {
                         onmouseout="if('${this.currentOrdersView}' !== 'history') { this.style.background='transparent'; this.style.color='#6b7280'; }"
                     >
                         <i class="fas fa-history" style="margin-right: 6px;"></i>
-                        History
+                        ${window.t ? window.t('history') : 'History'}
                     </button>
                 </div>
 
@@ -2051,9 +2053,9 @@ class DeliveryApp {
 
         if (pageHeader) {
             if (view === 'active') {
-                pageHeader.textContent = 'Active Orders';
+                pageHeader.textContent = window.t ? window.t('activeOrders') : 'Active Orders';
             } else {
-                pageHeader.textContent = 'History (Last 24h)';
+                pageHeader.textContent = window.t ? window.t('history') : 'History';
             }
         }
 
@@ -2098,8 +2100,8 @@ class DeliveryApp {
             container.innerHTML = `
                 <div class="no-orders-minimal">
                     <i class="fas fa-clock"></i>
-                    <span>No active orders</span>
-                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">Orders you're working on will appear here</p>
+                    <span>${window.t ? window.t('noActiveOrders') : 'No active orders'}</span>
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">${window.t ? window.t('activeOrdersAppear') : "Orders you're working on will appear here"}</p>
                 </div>
             `;
             return;
@@ -2139,8 +2141,8 @@ class DeliveryApp {
             container.innerHTML = `
                 <div class="no-orders-minimal">
                     <i class="fas fa-history"></i>
-                    <span>No completed orders in the last 24 hours</span>
-                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">Completed deliveries from the last 24 hours will appear here</p>
+                    <span>${window.t ? window.t('noCompletedOrders24h') : 'No completed orders in the last 24 hours'}</span>
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 8px;">${window.t ? window.t('completedDeliveriesAppear') : 'Completed deliveries from the last 24 hours will appear here'}</p>
                 </div>
             `;
             return;
@@ -2183,10 +2185,12 @@ class DeliveryApp {
                 if (order.delivery_time && order.status === 'picked_up') {
                     const deliveryTime = new Date(order.delivery_time);
 
-                    // Only start timer if delivery time is in the future
+                    // Start timer if in the future; otherwise show Ended immediately
                     if (deliveryTime > now) {
                         console.log(`🔄 Resuming countdown for order ${order.id}`);
                         this.startDeliveryCountdown(order.id, deliveryTime);
+                    } else {
+                        this.updateCountdownDisplay(order.id, 0, true);
                     }
                 }
             });
@@ -2776,16 +2780,23 @@ class DeliveryApp {
                             </button>
                         </div>
                     ` : `
-                        <div style="
-                            background: #dcfce7;
-                            border: 1px solid #bbf7d0;
-                            border-radius: 8px;
-                            padding: 12px;
-                            text-align: center;
-                        ">
-                            <i class="fas fa-check-circle" style="color: #10b981; font-size: 16px; margin-right: 6px;"></i>
-                            <span style="color: #065f46; font-weight: 600; font-size: 14px;">Order ${statusText}</span>
-                        </div>
+                        ${order.status === 'picked_up' ? `
+                            <div style="background:#dbeafe;border:1px solid #bfdbfe;border-radius:8px;padding:12px;text-align:center;">
+                                <i class=\"fas fa-info-circle\" style=\"color:#3b82f6;font-size:16px;margin-right:6px;\"></i>
+                                <span style=\"color:#1d4ed8;font-weight:600;font-size:14px;\">Order Picked Up</span>
+                            </div>
+                            <div style=\"display:flex;gap:8px;margin-top:8px;\">
+                                <button onclick=\"event.stopPropagation(); deliveryApp.completeOrder(${order.id}, event)\" style=\"
+                                        flex:1;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;\">
+                                    <i class=\"fas fa-check\" style=\"margin-right:6px;\"></i> Complete
+                                </button>
+                            </div>
+                        ` : `
+                            <div style=\"background:#dcfce7;border:1px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center;\">
+                                <i class=\"fas fa-check-circle\" style=\"color:#10b981;font-size:16px;margin-right:6px;\"></i>
+                                <span style=\"color:#065f46;font-weight:600;font-size:14px;\">Order ${statusText}</span>
+                            </div>
+                        `}
                     `}
                 </div>
             </div>
@@ -2835,6 +2846,7 @@ class DeliveryApp {
             // Refresh the orders list and stats (live)
             this.renderOrders();
             this.updateStats();
+            this.updateRecentActivity();
 
             // Refresh Recent Orders page if currently viewing it
             if (this.currentPage === 'recent') {
@@ -3102,6 +3114,14 @@ class DeliveryApp {
             // Start countdown timer for this order
             this.startDeliveryCountdown(orderId, deliveryTime);
 
+            // Update smart memory so UI flips to picked_up immediately (hides Set Time)
+            try {
+                const mem = this.smartMemory?.acceptedOrders?.data || [];
+                const existing = mem.find(o => o && (o.id === orderId || (o.id && o.id.toString() === orderId.toString())));
+                const updated = { ...(existing || { id: orderId }), status: 'picked_up', delivery_time: deliveryTime.toISOString(), delivery_minutes: minutes, picked_up_at: new Date().toISOString() };
+                this.updateItemInMemory('acceptedOrders', orderId, updated);
+            } catch(_) {}
+
             // Refresh the orders list to show updated status
             this.renderOrders();
 
@@ -3141,15 +3161,26 @@ class DeliveryApp {
             const timeLeft = deliveryTime.getTime() - now.getTime();
 
             if (timeLeft <= 0) {
-                // Time's up - auto complete the order
-                console.log(`⏰ Timer expired for order ${orderId} - auto completing`);
+                // Time's up - do NOT auto-complete; notify and mark ended
+                console.log(`⏰ Timer expired for order ${orderId} - notifying driver`);
                 clearInterval(this.deliveryTimers[orderId]);
                 delete this.deliveryTimers[orderId];
 
+                // Update UI to show Ended
+                this.updateCountdownDisplay(orderId, 0, true);
+
+                // Push notification to this driver (server will fan-out to all devices)
                 try {
-                    await this.autoCompleteOrder(orderId);
-                } catch (error) {
-                    console.error('Error auto-completing order:', error);
+                    await fetch(`/api/orders/${orderId}/timer-expired`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.sessionToken}`
+                        },
+                        body: JSON.stringify({})
+                    });
+                } catch (err) {
+                    console.warn('Timer-expired notify failed (non-fatal):', err);
                 }
             } else {
                 // Update countdown display
@@ -3192,6 +3223,7 @@ class DeliveryApp {
             // Refresh the orders list and stats (live)
             this.renderOrders();
             this.updateStats();
+            this.updateRecentActivity();
 
         } catch (error) {
             console.error('Error auto-completing order:', error);
@@ -3200,9 +3232,9 @@ class DeliveryApp {
     }
 
     // Update countdown display in order card (optimized)
-    updateCountdownDisplay(orderId, timeLeft) {
-        const minutes = Math.floor(timeLeft / (1000 * 60));
-        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+    updateCountdownDisplay(orderId, timeLeft, isEnded = false) {
+        const minutes = Math.floor(Math.max(0, timeLeft) / (1000 * 60));
+        const seconds = Math.floor((Math.max(0, timeLeft) % (1000 * 60)) / 1000);
         const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
         // Use cached element reference if available
@@ -3251,10 +3283,18 @@ class DeliveryApp {
 
         // Update content efficiently
         if (countdownElement) {
-            // Only update if content has changed to avoid unnecessary reflows
-            const newContent = `<i class="fas fa-clock" style="font-size: 12px;"></i> Delivery in ${timeString}`;
-            if (countdownElement.innerHTML !== newContent) {
-                countdownElement.innerHTML = newContent;
+            if (isEnded) {
+                const redBg = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                countdownElement.style.background = redBg;
+                countdownElement.style.boxShadow = '0 2px 4px rgba(220, 38, 38, 0.2)';
+                const newContent = `<i class="fas fa-exclamation-circle" style="font-size: 12px;"></i> Deliver Time: Ended`;
+                if (countdownElement.innerHTML !== newContent) countdownElement.innerHTML = newContent;
+            } else {
+                const blueBg = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+                countdownElement.style.background = blueBg;
+                countdownElement.style.boxShadow = '0 2px 4px rgba(59, 130, 246, 0.2)';
+                const newContent = `<i class=\"fas fa-clock\" style=\"font-size: 12px;\"></i> Delivery in ${timeString}`;
+                if (countdownElement.innerHTML !== newContent) countdownElement.innerHTML = newContent;
             }
         }
     }
@@ -8935,16 +8975,18 @@ class DeliveryApp {
                     </div>
 
                     <!-- Status Display (no action buttons for Recent page) -->
-                    <div style="
-                        background: #dcfce7;
-                        border: 1px solid #bbf7d0;
-                        border-radius: 8px;
-                        padding: 12px;
-                        text-align: center;
-                    ">
-                        <i class="fas fa-info-circle" style="color: #10b981; font-size: 16px; margin-right: 6px;"></i>
-                        <span style="color: #065f46; font-weight: 600; font-size: 14px;">Order ${statusText}</span>
-                    </div>
+                    ${(() => {
+                        // Dynamic panel colors by status
+                        let bg='#dcfce7', br='#bbf7d0', ic='#10b981', tx='#065f46';
+                        if (order.status === 'assigned') { bg = '#fef3c7'; br = '#fde68a'; ic = '#d97706'; tx = '#92400e'; }
+                        else if (order.status === 'picked_up') { bg = '#dbeafe'; br = '#bfdbfe'; ic = '#3b82f6'; tx = '#1d4ed8'; }
+                        return `
+                        <div style="background:${bg}; border:1px solid ${br}; border-radius:8px; padding:12px; text-align:center;">
+                            <i class=\"fas fa-info-circle\" style=\"color: ${ic}; font-size: 16px; margin-right: 6px;\"></i>
+                            <span style=\"color: ${tx}; font-weight: 600; font-size: 14px;\">Order ${statusText}</span>
+                        </div>`;
+                    })()}
+
                 </div>
             </div>
         `;
@@ -9258,6 +9300,9 @@ class DeliveryApp {
         if (this.currentPage === 'recent') {
             this.loadRecentOrdersPage(false);
         }
+
+        // Update Home recent activity feed
+        this.updateRecentActivity();
     }
 
     // Handle order completed (real-time memory update)
@@ -9280,8 +9325,9 @@ class DeliveryApp {
             this.loadRecentOrdersPage(false);
         }
 
-        // Live update Home stats
+        // Live update Home stats and recent activity
         this.updateStats();
+        this.updateRecentActivity();
 
         console.log('🧠 Updated order status to delivered in memory and cache');
     }
@@ -10131,7 +10177,7 @@ class DeliveryApp {
                 this.playNotificationSound(data.strong || false);
                 break;
             case 'order_accepted':
-                this.handleOrderAccepted(data);
+                this.handleOrderAcceptedFromSW(data);
                 break;
             default:
                 console.log('Unknown service worker message type:', data.type);
@@ -10174,13 +10220,14 @@ class DeliveryApp {
     }
 
     // Handle order accepted from service worker
-    handleOrderAccepted(data) {
+    handleOrderAcceptedFromSW(data) {
         console.log('Order accepted via notification:', data);
 
         const { orderId, notificationId } = data;
 
         // Refresh orders to show updated status
         this.renderOrders();
+        this.updateRecentActivity();
 
         // Mark related notification as read
         if (notificationId) {

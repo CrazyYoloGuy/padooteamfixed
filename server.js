@@ -3325,6 +3325,9 @@ app.put('/api/orders/:orderId/complete', async (req, res) => {
 
         console.log(`Order ${orderId} completed successfully`);
 
+        // Bust recent orders cache so Recent page shows the completed order instantly
+        try { recentOrdersCache = null; recentOrdersCacheTime = 0; } catch (_) {}
+
         res.json({
             success: true,
             order: data,
@@ -3400,6 +3403,48 @@ app.put('/api/orders/:orderId/pickup', async (req, res) => {
             message: 'Failed to update pickup status',
             error: error.message
         });
+    }
+});
+
+// POST /api/orders/:orderId/timer-expired - Notify driver that delivery timer ended
+app.post('/api/orders/:orderId/timer-expired', authenticateUser, async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const driverId = req.userId;
+
+        // Fetch order to validate ownership and get shop id
+        const { data: order, error } = await supabase
+            .from('shop_orders')
+            .select('id, driver_id, shop_account_id')
+            .eq('id', parseInt(orderId))
+            .single();
+
+        if (error || !order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+        if (order.driver_id !== driverId) {
+            return res.status(403).json({ success: false, message: 'Not your order' });
+        }
+
+        // Send a push notification to this driver
+        await sendPushNotification(driverId, 'driver', {
+            id: `timer-ended-${orderId}-${Date.now()}`,
+            title: `Delivery time ended`,
+            message: `Order #${orderId} timer ended. Complete when delivered.`,
+            order_id: orderId,
+        });
+
+        // Optionally broadcast a WS update to this driver session (for multi-tabs)
+        broadcastToUser(driverId, 'driver', {
+            type: 'delivery_timer_ended',
+            orderId: parseInt(orderId),
+        });
+
+        return res.json({ success: true });
+
+    } catch (e) {
+        console.error('Error notifying timer expired:', e);
+        res.status(500).json({ success: false, message: 'Failed to notify timer expired' });
     }
 });
 
@@ -5659,10 +5704,13 @@ app.post('/api/orders/accept', authenticateUser, async (req, res) => {
             console.warn('Broadcast removal failed (non-fatal):', e);
         }
 
-        // 3) Respond immediately to the accepting driver
+        // 3) Bust recent orders cache so Recent page reflects this immediately
+        try { recentOrdersCache = null; recentOrdersCacheTime = 0; } catch (_) {}
+
+        // 4) Respond immediately to the accepting driver
         res.json({ success: true, message: 'Order accepted successfully', order: orderData, queued: true });
 
-        // 4) Continue background tasks (do not await)
+        // 5) Continue background tasks (do not await)
         (async () => {
             try {
                 // Mark related notification as read if provided
