@@ -4996,11 +4996,19 @@ class ShopApp {
                 this.orders[idx].status = 'confirmed';
                 this.showToast('Order confirmed in real time', 'success');
             }
+        } else if (action === 'completed' || action === 'delivered') {
+            // Move/update into delivered state and invalidate completed cache so History refreshes
+            if (idx !== -1) {
+                this.orders[idx] = { ...this.orders[idx], ...order, status: 'delivered' };
+            } else {
+                this.orders.unshift({ ...order, status: 'delivered' });
+            }
+            this._completedOrdersCache = null; // bust cache for History page
+            this.showToast('Order completed', 'success');
         }
 
-
-
         if (this.currentPage === 'alerts' || this.currentPage === 'orders') {
+            // If on History page, refresh content; renderOrdersPage will call loadOrdersContent()
             this.renderOrdersPage();
         }
     }

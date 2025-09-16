@@ -2556,7 +2556,21 @@ app.get('/api/shop/:shopId/orders', authenticateUser, async (req, res) => {
             query = query.eq('status', status);
         }
 
-        const { data, error } = await query;
+        // Retry transient network errors from supabase-js (TypeError: fetch failed)
+        async function runSupabaseWithRetry(executor, retries = 2, delayMs = 300) {
+            let last = null;
+            for (let i = 0; i <= retries; i++) {
+                const res = await executor();
+                if (!res?.error) return res;
+                const msg = (res.error && (res.error.message || res.error.toString())) || '';
+                if (!/fetch failed/i.test(msg)) return res; // only retry transient fetch failures
+                await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+                last = res;
+            }
+            return last;
+        }
+
+        const { data, error } = await runSupabaseWithRetry(() => query);
 
         if (error) {
             console.error('Error loading shop orders from database:', error);
@@ -2881,8 +2895,21 @@ app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res)
 
         console.log(`Loading fresh completed orders for shop ${shopId} (date: ${selectedDate})`);
 
-        // Fetch completed orders for the day with essential columns only
-        const { data, error } = await supabase
+        // Fetch completed orders for the day with essential columns only (with retry on transient fetch errors)
+        async function runSupabaseWithRetry(executor, retries = 2, delayMs = 300) {
+            let last = null;
+            for (let i = 0; i <= retries; i++) {
+                const res = await executor();
+                if (!res?.error) return res;
+                const msg = (res.error && (res.error.message || res.error.toString())) || '';
+                if (!/fetch failed/i.test(msg)) return res;
+                await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+                last = res;
+            }
+            return last;
+        }
+
+        const query1 = supabase
             .from('shop_orders')
             .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, delivery_time, driver_earnings')
             .eq('shop_account_id', shopId)
@@ -2891,6 +2918,7 @@ app.get('/api/shop/:shopId/completed-orders', authenticateUser, async (req, res)
             .lt('created_at', endISO)
             .order('created_at', { ascending: false })
             .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+        const { data, error } = await runSupabaseWithRetry(() => query1);
 
         if (error) {
             console.error('Error loading completed orders:', error);
@@ -3414,6 +3442,25 @@ app.put('/api/orders/:orderId/complete', async (req, res) => {
 
         // Bust recent orders cache so Recent page shows the completed order instantly
         try { recentOrdersCache = null; recentOrdersCacheTime = 0; } catch (_) {}
+
+        // Invalidate server-side completed orders cache for this shop
+        try {
+            if (typeof shopCompletedOrdersCache !== 'undefined' && data && data.shop_account_id) {
+                const prefix = `${data.shop_account_id}_`;
+                for (const key of Array.from(shopCompletedOrdersCache.keys())) {
+                    if (key.startsWith(prefix)) shopCompletedOrdersCache.delete(key);
+                }
+            }
+        } catch (_) {}
+
+        // Real-time: notify the shop so History updates instantly
+        try {
+            if (data && data.shop_account_id) {
+                broadcastOrderUpdateToShop(data.shop_account_id, 'completed', data);
+            }
+        } catch (e) {
+            console.warn('Broadcast to shop on complete failed (non-fatal):', e);
+        }
 
         res.json({
             success: true,

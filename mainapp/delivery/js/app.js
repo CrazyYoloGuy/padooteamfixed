@@ -6487,17 +6487,7 @@ class DeliveryApp {
                             cursor: pointer;
                         ">Close</button>
                         ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
-                            <button data-accept-order="true" data-notification-id="${notificationId}" onclick="deliveryApp.acceptOrder('${notificationId}', this); this.closest('[style*=\"position: fixed\"]').remove();" style="
-                                flex: 2;
-                                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                                color: white;
-                                border: none;
-                                padding: 14px;
-                                border-radius: 10px;
-                                font-size: 14px;
-                                font-weight: 600;
-                                cursor: pointer;
-                            ">Accept Order</button>
+>
                         ` : ''}
                     </div>
                 </div>
@@ -6635,17 +6625,7 @@ class DeliveryApp {
                             cursor: pointer;
                         ">Close</button>
                         ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
-                            <button data-accept-order="true" data-notification-id="${notificationId}" onclick="deliveryApp.acceptOrder('${notificationId}', this); this.closest('[style*=\"position: fixed\"]').remove();" style="
-                                flex: 2;
-                                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                                color: white;
-                                border: none;
-                                padding: 16px;
-                                border-radius: 12px;
-                                font-size: 16px;
-                                font-weight: 600;
-                                cursor: pointer;
-                            ">Accept Order</button>
+>
                         ` : ''}
                     </div>
                 </div>
