@@ -3380,23 +3380,27 @@ class ShopApp {
                 this.showToast('✅ Order created!', 'success');
             }
 
-            // Clear caches and refresh lightweight views in background
-            // Clear idempotency/lock flags after attempt
-            this._creatingOrder = false;
-            // Also clear lock on failure
+            // Clear idempotency/lock flags and restore button
             this._creatingOrder = false;
             this._activeIdempotencyKey = null;
             if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText || 'Create Order'; }
 
-            this._activeIdempotencyKey = null;
-            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText || 'Create Order'; }
+            // Optimistically update local cache so Pending shows instantly
+            if (result.order) {
+                this._ordersCache = this._ordersCache || { time: Date.now(), data: [] };
+                this._ordersCache.data = [result.order, ...((this._ordersCache.data) || [])];
+                this._ordersCache.time = Date.now();
+            }
 
-            this._ordersCache = null;
+            // Fast UI update without waiting for network
             if (this.currentPage === 'dashboard') {
-                setTimeout(() => this.loadDashboardData(), 50);
+                const orders = (this._ordersCache && this._ordersCache.data) ? this._ordersCache.data : [];
+                this.renderDashboardOrders(orders, true);
+                // Refresh in background to reconcile with server
+                this.refreshDashboardOrdersBackground();
             }
             if (this.currentPage === 'orders') {
-                setTimeout(() => this.loadOrdersContent(), 50);
+                // Orders page shows completed history; nothing to update here
             }
         } catch (error) {
             console.error('Error creating order:', error);

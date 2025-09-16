@@ -386,7 +386,12 @@ class DeliveryApp {
         try {
             if (!this.smartMemory || !this.smartMemory[dataType]) return;
             const memory = this.smartMemory[dataType];
-            memory.data = memory.data.filter(item => item.id !== itemId);
+            if (dataType === 'notifications') {
+                const targetId = (itemId || '').toString();
+                memory.data = (memory.data || []).filter(item => ((item?.id)?.toString && item.id.toString()) !== targetId);
+            } else {
+                memory.data = memory.data.filter(item => item.id !== itemId);
+            }
             memory.lastUpdate = Date.now();
             console.log(`🧠 Removed item from ${dataType} memory`);
         } catch (error) {
@@ -2832,12 +2837,31 @@ class DeliveryApp {
 
             this.showToast('🎉 Order completed successfully!', 'success');
 
-            // Update recent orders cache with completed order
+            // Update local memories and cache so UI flips instantly
             if (result.order) {
-                this.updateRecentOrdersCache(result.order, 'completed');
+                try {
+                    // Accepted orders memory: mark delivered immediately
+                    const mem = this.smartMemory?.acceptedOrders?.data || [];
+                    const existing = mem.find(o => o && (String(o.id) === String(orderId)));
+                    const targetId = existing?.id ?? orderId;
+                    const updated = { ...result.order, status: 'delivered' };
+                    this.updateItemInMemory('acceptedOrders', targetId, updated);
+                } catch (_) {}
+
+                try {
+                    // Recent orders memory: mark delivered too
+                    const memR = this.smartMemory?.recentOrders?.data || [];
+                    const existingR = memR.find(o => o && (String(o.id) === String(orderId)));
+                    const targetIdR = existingR?.id ?? orderId;
+                    const updatedR = { ...result.order, status: 'delivered' };
+                    this.updateItemInMemory('recentOrders', targetIdR, updatedR);
+                } catch (_) {}
+
+                // Update recent orders cache used by Recent page
+                this.updateRecentOrdersCache({ ...result.order, status: 'delivered' }, 'completed');
             }
 
-            // Invalidate memory to force refresh
+            // Invalidate memory timestamps to allow background refresh later
             if (this.smartMemory) {
                 this.smartMemory.acceptedOrders.lastUpdate = 0;
                 this.smartMemory.recentOrders.lastUpdate = 0;
@@ -6194,10 +6218,11 @@ class DeliveryApp {
                 button.disabled = true;
             }
 
-            // Find the notification to get the order ID
-            const notification = this.notifications.find(n => n.id === notificationId);
+            // Find the notification to get the order ID (tolerate string/number mismatches)
+            const nid = (notificationId || '').toString();
+            const notification = this.notifications.find(n => ((n?.id)?.toString && n.id.toString()) === nid);
             if (!notification) {
-                console.error('❌ Notification not found in memory. Available notifications:', this.notifications.map(n => n.id));
+                console.error('❌ Notification not found in memory. Available notifications:', (this.notifications || []).map(n => (n?.id)?.toString && n.id.toString()));
                 throw new Error('Notification not found');
             }
 
@@ -6224,7 +6249,7 @@ class DeliveryApp {
                     this.showToast('This item is not linked to an order and was removed.', 'warning');
 
                     // Remove from local list so it doesn’t block the flow
-                    this.notifications = (this.notifications || []).filter(n => n.id !== notificationId);
+                    this.notifications = (this.notifications || []).filter(n => (String(n?.id) !== String(notificationId)));
                     if (this.currentPage === 'notifications') {
                         this.renderNotifications(this.notifications);
                         this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
@@ -6263,7 +6288,7 @@ class DeliveryApp {
                 // If server says order is gone/invalid or already taken, remove this notification to keep flow clean
                 const stale = [404, 409, 410].includes(response.status) || /not\s*found|already\s*(accepted|assigned)|invalid\s*order/i.test(msg);
                 if (stale) {
-                    this.notifications = (this.notifications || []).filter(n => n.id !== notificationId);
+                    this.notifications = (this.notifications || []).filter(n => (String(n?.id) !== String(notificationId)));
                     if (this.currentPage === 'notifications') {
                         this.renderNotifications(this.notifications);
                         this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
@@ -6284,7 +6309,7 @@ class DeliveryApp {
             // already handles the notification confirmation when accepting the order
 
             // Remove the notification from the current view and memory
-            this.notifications = this.notifications.filter(n => n.id !== notificationId);
+            this.notifications = this.notifications.filter(n => (String(n?.id) !== String(notificationId)));
             this.removeFromMemory('notifications', notificationId);
 
             // Invalidate orders memory to force refresh
@@ -6658,7 +6683,7 @@ class DeliveryApp {
             `;
         }
 
-        return notifications.map(notification => this.createModernOrderCard(notification)).join('');
+        return (notifications || []).filter(n => ((n.status || 'pending') === 'pending')).map(n => this.createModernOrderCard(n)).join('');
     }
 
     createModernOrderCard(notification) {
@@ -6666,7 +6691,7 @@ class DeliveryApp {
         const statusIcon = notification.status === 'pending' ? 'shopping-bag' : 'check-circle';
         const statusText = notification.status === 'pending' ? 'New Order' : 'Completed';
 
-        // Parse order details from message
+        // Prefer structured fields; fall back to parsing message
         const message = this.unescapeHTML(notification.message || '');
         const orderMatch = message.match(/Order #(\d+)/);
         const amountMatch = message.match(/Amount: €([\d.]+)/);
@@ -6676,19 +6701,21 @@ class DeliveryApp {
         const nameMatch = message.match(/👤 (.+?)(?:\n|📝|$)/);
         const notesMatch = message.match(/📝 (.+?)(?:\n|$)/);
 
-        const orderId = orderMatch ? orderMatch[1] : 'N/A';
-        const amount = amountMatch ? amountMatch[1] : '0';
-        const address = addressMatch ? addressMatch[1].trim() : 'Address not provided';
-        const phone = phoneMatch ? phoneMatch[1].trim() : 'Phone not provided';
-        const preparationTime = timeMatch ? timeMatch[1].trim() : 'Ready Now';
-        const customerName = nameMatch ? nameMatch[1].trim() : '';
-        const notes = notesMatch ? notesMatch[1].trim() : '';
+        const orderId = notification.order_id || (orderMatch ? orderMatch[1] : 'N/A');
+        const amountNum = (notification.order_amount != null) ? Number(notification.order_amount) : (amountMatch ? Number(amountMatch[1]) : 0);
+        const amount = isNaN(amountNum) ? 0 : amountNum;
+        const address = notification.delivery_address || (addressMatch ? addressMatch[1].trim() : 'Address not provided');
+        const phone = notification.customer_phone || (phoneMatch ? phoneMatch[1].trim() : 'Phone not provided');
+        const rawPrep = (notification.preparation_time != null) ? `${notification.preparation_time} minutes` : (timeMatch ? timeMatch[1].trim() : 'Ready Now');
+        const preparationTime = rawPrep;
+        const customerName = notification.customer_name || (nameMatch ? nameMatch[1].trim() : '');
+        const notes = (notification.notes != null && notification.notes !== '') ? notification.notes : (notesMatch ? notesMatch[1].trim() : '');
 
         // Get shop name from notification
         const shopName = notification.shop?.name || notification.shop_name || 'Unknown Shop';
 
-        // Determine payment method (default to Cash if amount > 0, Card if amount is 0)
-        const paymentMethod = parseFloat(amount) > 0 ? 'Cash' : 'Card';
+        // Determine payment method (prefer structured field)
+        const paymentMethod = (notification.payment_method) ? notification.payment_method : ((Number(amount) > 0) ? 'Cash' : 'Card');
 
         // Parse preparation time for icon and display
         const prepTimeIcon = preparationTime.includes('Ready Now') ? 'bolt' :
@@ -6757,7 +6784,7 @@ class DeliveryApp {
                                 font-weight: 700;
                                 color: #111827;
                                 line-height: 1;
-                            ">${parseFloat(amount) > 0 ? `€${amount}` : 'Card'}</div>
+                            ">${(paymentMethod && paymentMethod.toLowerCase() === 'cash' && Number(amount) > 0) ? `€${Number(amount).toFixed(2)}` : 'Paid'}</div>
                             <span style="
                                 background: #ff6b35;
                                 color: white;
@@ -9288,8 +9315,22 @@ class DeliveryApp {
             this.updateRecentOrdersCache(data.order, 'accepted');
         }
 
-        // Remove from notifications if it was a notification
-        this.removeFromMemory('notifications', orderId);
+        // Remove any notification referencing this order (by order_id)
+        try {
+            // Remove from in-memory list
+            this.notifications = (this.notifications || []).filter(n => (String(n?.order_id) !== String(orderId)));
+            if (this.currentPage === 'notifications') {
+                this.renderNotifications(this.notifications);
+                this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
+            }
+            // Remove from smart memory store
+            if (this.smartMemory && this.smartMemory.notifications) {
+                const mem = this.smartMemory.notifications;
+                mem.data = (mem.data || []).filter(n => (String(n?.order_id) !== String(orderId)));
+                mem.lastUpdate = Date.now();
+            }
+        } catch (_) {}
+
 
         // Update recent orders memory if needed
         if (data.order) {

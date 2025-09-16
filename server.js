@@ -1645,34 +1645,68 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
             });
         }
 
-        // Verify the shop belongs to the authenticated user
-        const { data: shopData, error: shopError } = await supabase
-            .from('partner_shops')
-            .select('id, name')
-            .eq('id', parseInt(shop_id))
-            .eq('user_id', req.userId)
-            .single();
+        // Resolve shop context: allow either owned partner shop OR team membership in a shop_account
+        const parsedShopId = parseInt(shop_id);
+        if (!parsedShopId || isNaN(parsedShopId)) {
+            return res.status(400).json({ success: false, message: 'Invalid shop ID' });
+        }
 
-        if (shopError || !shopData) {
+        // 1) Check team membership (driver is part of the shop's team)
+        let shopName = null;
+        let isTeamMember = false;
+        try {
+            const { data: member } = await supabase
+                .from('shop_team_members')
+                .select('shop_id')
+                .eq('shop_id', parsedShopId)
+                .eq('driver_id', req.userId)
+                .maybeSingle();
+            if (member) {
+                isTeamMember = true;
+                const { data: shopAcc } = await supabase
+                    .from('shop_accounts')
+                    .select('id, shop_name')
+                    .eq('id', parsedShopId)
+                    .single();
+                shopName = shopAcc?.shop_name || null;
+            }
+        } catch (_) {}
+
+        // 2) If not team member, fall back to legacy owned partner shop
+        let ownedPartner = null;
+        if (!isTeamMember) {
+            const { data: shopDataLegacy } = await supabase
+                .from('partner_shops')
+                .select('id, name')
+                .eq('id', parsedShopId)
+                .eq('user_id', req.userId)
+                .maybeSingle();
+            if (shopDataLegacy) {
+                ownedPartner = shopDataLegacy;
+                shopName = ownedPartner.name;
+            }
+        }
+
+        if (!isTeamMember && !ownedPartner) {
             return res.status(400).json({
                 success: false,
-                message: 'Shop not found or does not belong to you'
+                message: 'Shop not found or you are not a member of its delivery team'
             });
         }
 
         console.log('Adding order for user:', req.userId);
 
-        // Insert the order with the authenticated user's ID
+        // Insert the order into the personal orders table (legacy driver list)
         const { data: orderData, error: orderError } = await supabase
             .from('orders')
             .insert([{
                 user_id: req.userId,
-                shop_id: parseInt(shop_id),
+                shop_id: parsedShopId,
                 price: parseFloat(price),
                 earnings: parseFloat(earnings),
                 notes: notes || '',
                 address: address || '',
-                payment_method: payment_method || 'cash'
+                payment_method: (payment_method || 'cash').toString().toLowerCase().trim()
             }])
             .select('*')
             .single();
@@ -1682,7 +1716,35 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
             throw orderError;
         }
 
-        // Combine the data
+        // Also mirror this order into shop_orders as an immediately completed delivery for shop history
+        try {
+            const method = (payment_method || 'cash').toString().toLowerCase().trim();
+            const isPaid = ['paid', 'card', 'credit', 'online'].includes(method);
+            const normalizedAmount = isPaid ? null : parseFloat(price);
+            const earningNumber = (earnings != null && earnings !== '') ? parseFloat(earnings) : null;
+
+            await supabase
+                .from('shop_orders')
+                .insert([{
+                    shop_account_id: parsedShopId,
+                    driver_id: req.userId,
+                    order_amount: isNaN(normalizedAmount) ? null : normalizedAmount,
+                    customer_name: null,
+                    customer_phone: null,
+                    delivery_address: address || '',
+                    notes: notes || '',
+                    payment_method: method,
+                    status: 'delivered',
+                    driver_earnings: earningNumber != null && !isNaN(earningNumber) ? earningNumber : 1.50,
+                    created_at: new Date().toISOString(),
+                    completed_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                }]);
+        } catch (e) {
+            console.warn('Mirroring manual order into shop_orders failed (non-fatal):', e?.message || e);
+        }
+
+        // Combine the response data for the client
         const order = {
             id: orderData.id,
             price: orderData.price,
@@ -1691,7 +1753,7 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
             address: orderData.address,
             payment_method: orderData.payment_method,
             created_at: orderData.created_at,
-            shop_name: shopData.name
+            shop_name: shopName || 'Unknown Shop'
         };
 
         console.log('✅ Order added successfully for user', req.userId, ':', order.id);
@@ -2678,7 +2740,7 @@ app.get('/api/recent-orders', authenticateUser, async (req, res) => {
             .from('shop_orders')
             .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, preparation_time')
             .not('driver_id', 'is', null)
-            .in('status', ['assigned', 'picked_up', 'delivered'])
+            .in('status', ['assigned', 'picked_up'])
             .order('created_at', { ascending: false })
             .limit(20);
 
