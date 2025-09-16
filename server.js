@@ -1696,34 +1696,39 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
 
         console.log('Adding order for user:', req.userId);
 
-        // Insert the order into the personal orders table (legacy driver list)
-        const { data: orderData, error: orderError } = await supabase
-            .from('orders')
-            .insert([{
-                user_id: req.userId,
-                shop_id: parsedShopId,
-                price: parseFloat(price),
-                earnings: parseFloat(earnings),
-                notes: notes || '',
-                address: address || '',
-                payment_method: (payment_method || 'cash').toString().toLowerCase().trim()
-            }])
-            .select('*')
-            .single();
-
-        if (orderError) {
-            console.error('Error inserting order:', orderError);
-            throw orderError;
+        // Insert into personal orders ONLY if this is a legacy owned partner shop (to satisfy FK)
+        let orderData = null;
+        let persisted = false;
+        if (ownedPartner) {
+            const ins = await supabase
+                .from('orders')
+                .insert([{
+                    user_id: req.userId,
+                    shop_id: parsedShopId,
+                    price: parseFloat(price),
+                    earnings: parseFloat(earnings),
+                    notes: notes || '',
+                    address: address || '',
+                    payment_method: (payment_method || 'cash').toString().toLowerCase().trim()
+                }])
+                .select('*')
+                .single();
+            orderData = ins.data;
+            if (ins.error) {
+                console.error('Error inserting order (legacy orders table):', ins.error);
+                throw ins.error;
+            }
+            persisted = true;
         }
 
-        // Also mirror this order into shop_orders as an immediately completed delivery for shop history
+        // Mirror into shop_orders as an immediately completed delivery for shop history
         try {
             const method = (payment_method || 'cash').toString().toLowerCase().trim();
             const isPaid = ['paid', 'card', 'credit', 'online'].includes(method);
             const normalizedAmount = isPaid ? null : parseFloat(price);
             const earningNumber = (earnings != null && earnings !== '') ? parseFloat(earnings) : null;
 
-            await supabase
+            const { data: shopOrder, error: shopInsertError } = await supabase
                 .from('shop_orders')
                 .insert([{
                     shop_account_id: parsedShopId,
@@ -1739,13 +1744,21 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
                     created_at: new Date().toISOString(),
                     completed_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
-                }]);
+                }])
+                .select('*')
+                .single();
+            if (shopInsertError) {
+                console.warn('Mirroring manual order into shop_orders failed (non-fatal):', shopInsertError?.message || shopInsertError);
+            } else {
+                // Attach to request for response building
+                req._manualShopOrder = shopOrder;
+            }
         } catch (e) {
             console.warn('Mirroring manual order into shop_orders failed (non-fatal):', e?.message || e);
         }
 
-        // Combine the response data for the client
-        const order = {
+        // Build response object
+        const order = orderData ? {
             id: orderData.id,
             price: orderData.price,
             earnings: orderData.earnings,
@@ -1754,14 +1767,26 @@ app.post('/api/user/orders', authenticateUser, async (req, res) => {
             payment_method: orderData.payment_method,
             created_at: orderData.created_at,
             shop_name: shopName || 'Unknown Shop'
+        } : {
+            // Not persisted in legacy orders; just return echo for UI
+            id: null,
+            price: parseFloat(price),
+            earnings: parseFloat(earnings),
+            notes: notes || '',
+            address: address || '',
+            payment_method: (payment_method || 'cash').toString().toLowerCase().trim(),
+            created_at: new Date().toISOString(),
+            shop_name: shopName || 'Unknown Shop'
         };
 
-        console.log('✅ Order added successfully for user', req.userId, ':', order.id);
+        console.log('✅ Manual order processed for user', req.userId, 'persisted:', persisted, 'shop:', parsedShopId);
 
         res.json({
             success: true,
             order: order,
-            message: 'Order added successfully'
+            persisted,
+            shop_order: req._manualShopOrder ? { ...req._manualShopOrder, shop_name: shopName || 'Unknown Shop' } : null,
+            message: persisted ? 'Order added successfully' : 'Order added to shop history'
         });
     } catch (error) {
         console.error('Error adding order:', error);
@@ -2740,7 +2765,7 @@ app.get('/api/recent-orders', authenticateUser, async (req, res) => {
             .from('shop_orders')
             .select('id, shop_account_id, driver_id, order_amount, customer_phone, delivery_address, status, notes, created_at, preparation_time')
             .not('driver_id', 'is', null)
-            .in('status', ['assigned', 'picked_up'])
+            .in('status', ['assigned', 'picked_up', 'delivered'])
             .order('created_at', { ascending: false })
             .limit(20);
 

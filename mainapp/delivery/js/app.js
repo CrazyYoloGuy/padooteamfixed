@@ -1388,16 +1388,18 @@ class DeliveryApp {
             console.log('Server response:', result);
 
                 if (response.ok && result.success) {
-                    // Add order to local array
-                    this.orders.unshift(result.order);
+                    // Add to personal order list only if persisted to legacy orders table
+                    if (result.persisted) {
+                        this.orders.unshift(result.order);
 
-                    // Re-render orders if on orders page
-                    if (this.currentPage === 'orders') {
-                        this.renderOrders();
+                        // Re-render orders if on orders page
+                        if (this.currentPage === 'orders') {
+                            this.renderOrders();
+                        }
+
+                        // Update stats
+                        this.updateUI();
                     }
-
-                    // Update stats
-                    this.updateUI();
 
                 // Close modal
                 this.closeModal();
@@ -1406,6 +1408,19 @@ class DeliveryApp {
                     this.showToast(result.message || 'Order added successfully!', 'success');
 
                     console.log('Order added successfully:', result.order);
+
+                    // If server mirrored into shop_orders, inject into acceptedOrders memory as delivered
+                    if (result.shop_order) {
+                        try {
+                            const shopOrder = { ...result.shop_order, status: 'delivered' };
+                            this.addToMemory('acceptedOrders', shopOrder);
+                            // If user is on Orders page and History tab, render instantly
+                            if (this.currentPage === 'orders' && this.currentOrdersView === 'history') {
+                                const contentArea = document.getElementById('orders-content-area');
+                                if (contentArea) await this.loadHistoryContent(contentArea);
+                            }
+                        } catch (e) { console.warn('Could not inject manual order into history memory', e); }
+                    }
             } else {
                     console.log('Server error:', result);
 
