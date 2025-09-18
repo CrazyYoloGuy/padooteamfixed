@@ -339,6 +339,22 @@ class DeliveryApp {
             if (!this.smartMemory || !this.smartMemory[dataType]) return;
             const memory = this.smartMemory[dataType];
 
+            // Normalize orders so UI never shows N/A/Unknown when we have the data
+            const normalizeOrder = (o) => {
+                if (!o) return o;
+                const n = { ...o };
+                if ((n.id == null || n.id === 'N/A') && n.order_id != null) n.id = n.order_id;
+                if (!n.shop_name) {
+                    try {
+                        const sid = n.shop_account_id || n.shop_id;
+                        const shops = (this.smartMemory?.shops?.data?.length ? this.smartMemory.shops.data : this.shops) || [];
+                        const s = shops.find(x => x && (String(x.id) === String(sid)));
+                        if (s) n.shop_name = s.name || s.shop_name;
+                    } catch(_) {}
+                }
+                return n;
+            };
+
             if (dataType === 'notifications') {
                 // Ensure array
                 if (!Array.isArray(memory.data)) memory.data = [];
@@ -355,7 +371,9 @@ class DeliveryApp {
                     memory.data.unshift(item);
                 }
             } else {
-                memory.data.unshift(item); // default behavior
+                // Normalize accepted/recent orders before storing
+                const toStore = (dataType === 'acceptedOrders' || dataType === 'recentOrders') ? normalizeOrder(item) : item;
+                memory.data.unshift(toStore);
             }
 
             memory.lastUpdate = Date.now();
@@ -2110,11 +2128,52 @@ class DeliveryApp {
     // Load Active Orders (assigned/picked_up status)
     async loadActiveOrdersContent(container) {
         const acceptedOrders = await this.loadAcceptedOrders();
-        const activeOrders = acceptedOrders.filter(order =>
-            order.status === 'assigned' || order.status === 'picked_up'
+        let activeOrders = acceptedOrders.filter(order =>
+            order && (order.status === 'assigned' || order.status === 'picked_up')
         );
 
-        console.log('🔍 Active orders found:', activeOrders.length, activeOrders.map(o => `${o.id}:${o.status}`));
+        // Normalize and filter to avoid transient N/A/Unknown cards
+        const normalize = (o) => {
+            if (!o) return o;
+            const n = { ...o };
+            if ((n.id == null || n.id === 'N/A') && n.order_id != null) n.id = n.order_id;
+            if (!n.shop_name) {
+                try {
+                    const sid = n.shop_account_id || n.shop_id;
+                    const shops = (this.smartMemory?.shops?.data?.length ? this.smartMemory.shops.data : this.shops) || [];
+                    const s = shops.find(x => x && (String(x.id) === String(sid)));
+                    if (s) n.shop_name = s.name || s.shop_name;
+                } catch(_) {}
+            }
+            return n;
+        };
+        activeOrders = activeOrders.map(normalize);
+
+        // Smart bug metrics (phone/address can be empty; not bugs)
+        const isBug = (o) => {
+            if (!o) return true;
+            if (!o.id || o.id === 'N/A') return true;
+            if (!o.shop_name || o.shop_name === 'Unknown Shop') return true;
+            if (!o.created_at || isNaN(new Date(o.created_at))) return true;
+            const valid = ['pending','accepted','assigned','picked_up','delivered','cancelled'];
+            if (o.status && !valid.includes(o.status)) return true;
+            return false;
+        };
+        const bugCountNow = activeOrders.filter(isBug).length;
+        this.metrics = this.metrics || {};
+        this.metrics.bugCards = (this.metrics.bugCards || 0) + bugCountNow;
+        this.metrics.lastBugAt = Date.now();
+        window.__bugCardCount = this.metrics.bugCards;
+
+        // Hide incomplete items from UI; trigger self-heal refresh
+        const filtered = activeOrders.filter(o => o && o.id && o.id !== 'N/A');
+        const hadInvalids = filtered.length !== activeOrders.length || filtered.some(o => !o.shop_name || o.shop_name === 'Unknown Shop');
+        if (hadInvalids) {
+            this.scheduleActiveOrdersHeal && this.scheduleActiveOrdersHeal();
+        }
+        activeOrders = filtered;
+
+        console.log('🔍 Active orders (sanitized):', activeOrders.length, activeOrders.map(o => `${o.id}:${o.status}`));
 
         if (activeOrders.length === 0) {
             container.innerHTML = `
@@ -2145,6 +2204,23 @@ class DeliveryApp {
 
         // Initialize delivery timers for orders with delivery times
         this.initializeDeliveryTimers(activeOrders);
+    }
+
+    // Self-heal: refresh accepted orders quickly to fix any incomplete data within 10s
+    scheduleActiveOrdersHeal() {
+        if (this._activeHealScheduled) return;
+        this._activeHealScheduled = true;
+        // quick attempt
+        setTimeout(async () => {
+            try { await this.getFromMemory('acceptedOrders', true); } catch(_) {}
+            this.renderOrders();
+        }, 2000);
+        // final attempt within ~10s
+        setTimeout(async () => {
+            try { await this.getFromMemory('acceptedOrders', true); } catch(_) {}
+            this.renderOrders();
+            this._activeHealScheduled = false;
+        }, 9000);
     }
 
     // Load History (delivered status)
@@ -9176,11 +9252,12 @@ class DeliveryApp {
                     this.reconnectTimeout = null;
                 }
 
-                // Authenticate with server
+                // Authenticate with server (include session token for resilience)
                 this.ws.send(JSON.stringify({
                     type: 'authenticate',
                     userId: this.userId,
-                    userType: 'driver'
+                    userType: 'driver',
+                    sessionToken: this.sessionToken
                 }));
             };
 

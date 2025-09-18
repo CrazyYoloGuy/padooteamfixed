@@ -1000,6 +1000,7 @@ class ShopApp {
                     <p>Manage your shop preferences and delivery team</p>
                 </div>
 
+
                 <!-- Delivery Team Management -->
                 <div class="settings-section">
                     <div class="section-header">
@@ -1128,6 +1129,126 @@ class ShopApp {
             });
         }
     }
+
+        // Open language selection modal (like driver side)
+        openLanguageModal() {
+            // Remove any existing modal
+            const existing = document.getElementById('language-modal');
+            if (existing) existing.remove();
+
+            const currentLang = (window.i18n && typeof window.i18n.getCurrentLanguage === 'function')
+                ? window.i18n.getCurrentLanguage()
+                : (localStorage.getItem('app_language') || 'en');
+            let selectedLang = currentLang;
+
+            const t = (key, fallback) => (window.t ? window.t(key) : fallback);
+
+            const modalHTML = `
+                <div id="language-modal" style="
+                    position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
+                    background: rgba(0,0,0,0.4);
+                ">
+                    <div style="
+                        width: min(520px, 92vw); max-width: 520px; background: #fff; border-radius: 16px; overflow: hidden;
+                        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+                    ">
+                        <div style="padding: 18px 20px; border-bottom: 1px solid #f3f4f6; display:flex; align-items:center; justify-content: space-between;">
+                            <h3 style="margin:0; font-size: 18px; font-weight: 700; color: #111827;" data-translate="languageModal">${t('languageModal','Language Selection')}</h3>
+                            <button onclick=\"document.getElementById('language-modal').remove()\" style=\"background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;\">×</button>
+                        </div>
+
+                        <div style="padding: 16px 20px;">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <button id="lang-opt-en" type="button" style="
+                                    border: 2px solid ${selectedLang==='en' ? '#ff6b35' : '#e5e7eb'}; border-radius: 12px; padding: 14px; cursor: pointer; text-align: left;
+                                    background: ${selectedLang==='en' ? '#fff7ed' : '#fff'}; transition: all .2s;
+                                ">
+                                    <div style="display:flex; align-items:center; gap:10px;">
+                                        <div style="width:34px;height:34px;border-radius:10px;background:#f3f4f6;display:grid;place-items:center;">
+                                            <i class="fas fa-flag-usa" style="color:#6b7280;"></i>
+                                        </div>
+                                        <div>
+                                            <div style="font-weight:600;color:#111827;" data-translate="english">${t('english','English')}</div>
+                                            <div style="font-size:12px;color:#6b7280;">EN</div>
+                                        </div>
+                                    </div>
+                                </button>
+                                <button id="lang-opt-gr" type="button" style="
+                                    border: 2px solid ${selectedLang==='gr' ? '#ff6b35' : '#e5e7eb'}; border-radius: 12px; padding: 14px; cursor: pointer; text-align: left;
+                                    background: ${selectedLang==='gr' ? '#fff7ed' : '#fff'}; transition: all .2s;
+                                ">
+                                    <div style="display:flex; align-items:center; gap:10px;">
+                                        <div style="width:34px;height:34px;border-radius:10px;background:#f3f4f6;display:grid;place-items:center;">
+                                            <i class="fas fa-flag" style="color:#6b7280;"></i>
+                                        </div>
+                                        <div>
+                                            <div style="font-weight:600;color:#111827;" data-translate="greek">${t('greek','Greek')}</div>
+                                            <div style="font-size:12px;color:#6b7280;">GR</div>
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+
+                            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                                <button id="lang-cancel" class="btn secondary" style="padding:10px 14px; border-radius:10px; border:1px solid #e5e7eb; background:#fff; color:#374151;">
+                                    ${t('cancel','Cancel')}
+                                </button>
+                                <button id="lang-save" class="btn primary" style="padding:10px 14px; border-radius:10px; background:#ff6b35; color:#fff; border:none;">
+                                    ${t('saveSettings','Save Settings')}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            const modal = document.getElementById('language-modal');
+            const optEn = document.getElementById('lang-opt-en');
+            const optGr = document.getElementById('lang-opt-gr');
+            const saveBtn = document.getElementById('lang-save');
+            const cancelBtn = document.getElementById('lang-cancel');
+
+            const updateStyles = () => {
+                if (!optEn || !optGr) return;
+                optEn.style.borderColor = (selectedLang==='en') ? '#ff6b35' : '#e5e7eb';
+                optEn.style.background = (selectedLang==='en') ? '#fff7ed' : '#fff';
+                optGr.style.borderColor = (selectedLang==='gr') ? '#ff6b35' : '#e5e7eb';
+                optGr.style.background = (selectedLang==='gr') ? '#fff7ed' : '#fff';
+            };
+
+            if (optEn) optEn.addEventListener('click', () => { selectedLang = 'en'; updateStyles(); });
+            if (optGr) optGr.addEventListener('click', () => { selectedLang = 'gr'; updateStyles(); });
+
+            if (cancelBtn) cancelBtn.addEventListener('click', () => modal.remove());
+
+            if (saveBtn) saveBtn.addEventListener('click', async () => {
+                try {
+                    if (window.i18n && typeof window.i18n.setLanguage === 'function') {
+                        const ok = await window.i18n.setLanguage(selectedLang);
+                        if (ok) {
+                            this.showToast(t('settingsSaved','Settings saved successfully'), 'success');
+                        } else {
+                            this.showToast(t('failedToSaveSettings','Failed to save settings'), 'error');
+                        }
+                    } else {
+                        // Fallback local only
+                        localStorage.setItem('app_language', selectedLang);
+                        this.showToast(t('settingsSaved','Settings saved successfully'), 'success');
+                    }
+                } catch (e) {
+                    console.error('Language save failed', e);
+                    this.showToast(t('failedToSaveSettings','Failed to save settings'), 'error');
+                } finally {
+                    modal.remove();
+                }
+            });
+
+            // Close when clicking backdrop
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
+        }
+
 
     async loadDrivers() {
         try {
@@ -2299,12 +2420,10 @@ class ShopApp {
                                 font-size: 16px;
                                 font-weight: 500;
                                 color: #111827;
-                                margin-bottom: 2px;
-                            ">Announcements</div>
+                                margin-bottom: 2px;" data-translate="announcementsTitle">Announcements</div>
                             <div style="
                                 font-size: 13px;
-                                color: #6b7280;
-                            ">Important updates from admins</div>
+                                color: #6b7280;" data-translate="announcementsDesc">Important updates from admins</div>
                         </div>
                         <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                     </div>
@@ -2334,15 +2453,45 @@ class ShopApp {
                                     font-size: 16px;
                                     font-weight: 500;
                                     color: #111827;
-                                    margin-bottom: 2px;
-                                ">Analytics</div>
+                                    margin-bottom: 2px;" data-translate="analytics">Analytics</div>
                                 <div style="
                                     font-size: 13px;
-                                    color: #6b7280;
-                                ">Insights and metrics (coming soon)</div>
+                                    color: #6b7280;" data-translate="analyticsDesc">Insights and metrics (coming soon)</div>
                             </div>
                             <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                         </div>
+
+                        <!-- Language (under Analytics) -->
+                        <div onclick="shopApp.openLanguageModal()" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 16px 20px;
+                            cursor: pointer;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                            <div style="
+                                width: 40px;
+                                height: 40px;
+                                background: #eef2ff;
+                                border-radius: 10px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                margin-right: 16px;
+                            ">
+                                <i class="fas fa-language" style="color: #6366f1; font-size: 18px;"></i>
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="
+                                    font-size: 16px;
+                                    font-weight: 500;
+                                    color: #111827;
+                                    margin-bottom: 2px;" data-translate="languageSettings">Language</div>
+                                <div style="font-size: 13px; color: #6b7280;" data-translate="languageSettingsDesc">Choose your preferred language</div>
+                            </div>
+                            <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
+                        </div>
+
 
 
                     <!-- Settings -->
@@ -2370,12 +2519,10 @@ class ShopApp {
                                 font-size: 16px;
                                 font-weight: 500;
                                 color: #111827;
-                                margin-bottom: 2px;
-                            ">Settings</div>
+                                margin-bottom: 2px;" data-translate="settings">Settings</div>
                             <div style="
                                 font-size: 13px;
-                                color: #6b7280;
-                            ">Account and preferences</div>
+                                color: #6b7280;" data-translate="accountAndPreferences">Account and preferences</div>
                         </div>
                         <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                     </div>
@@ -2403,8 +2550,7 @@ class ShopApp {
                                 font-size: 16px;
                                 font-weight: 500;
                                 color: #111827;
-                                margin-bottom: 2px;
-                            ">Account Information</div>
+                                margin-bottom: 2px;" data-translate="accountInfo">Account Information</div>
                             <div style="
                                 font-size: 13px;
                                 color: #6b7280;
@@ -2463,6 +2609,17 @@ class ShopApp {
         `;
 
         profileContainer.innerHTML = enhancedProfile;
+
+
+        // Apply translations to newly injected profile markup
+        if (window.i18n) {
+            try {
+                window.i18n.applyTranslations && window.i18n.applyTranslations();
+                if (typeof window.i18n.translatePlaceholders === 'function') {
+                    window.i18n.translatePlaceholders();
+                }
+            } catch (e) { console.warn('i18n apply on profile error', e); }
+        }
 
         console.log('Enhanced profile created with notifications widget:', {
             totalNotifications,
@@ -2660,7 +2817,7 @@ class ShopApp {
                         font-size: 20px;
                         font-weight: 600;
                         color: #111827;
-                    ">Create Order</h2>
+                    "><span data-translate="addOrder">Create Order</span></h2>
 
                     <!-- Dashed Border Create Order Area -->
                     <div class="create-order-btn" id="create-order-btn" style="
@@ -2708,7 +2865,7 @@ class ShopApp {
                             font-size: 16px;
                             line-height: 1.4;
                             transition: color 0.3s ease;
-                        ">Click to create order</p>
+                        "><span data-translate="clickToCreateOrder">Click to create order</span></p>
                     </div>
                 </div>
 
@@ -2734,8 +2891,8 @@ class ShopApp {
                             <i class="fas fa-history" style="color: white; font-size: 16px;"></i>
                         </div>
                         <div>
-                            <h3 style="margin: 0; font-size: 20px; font-weight: 600; color: #111827;">Recent Orders</h3>
-                            <p style="margin: 0; color: #6b7280; font-size: 14px;">Your latest delivery orders</p>
+                            <h3 style="margin: 0; font-size: 20px; font-weight: 600; color: #111827;"><span data-translate="recentOrders">Recent Orders</span></h3>
+                            <p style="margin: 0; color: #6b7280; font-size: 14px;"><span data-translate="yourLatestOrders">Your latest delivery orders</span></p>
                         </div>
                     </div>
 
@@ -2906,7 +3063,7 @@ class ShopApp {
                         font-size: 20px;
                         font-weight: 600;
                         color: #111827;
-                    ">Create Order</h2>
+                    "><span data-translate="addOrder">Create Order</span></h2>
                     <button class="close-modal" style="
                         background: none;
                         border: none;
@@ -2940,7 +3097,7 @@ class ShopApp {
                                 color: #374151;
                                 margin-bottom: 8px;
                                 font-size: 14px;
-                            ">Payment Method *</label>
+                            "><span data-translate="paymentMethod">Payment Method</span> *</label>
                             <div class="payment-methods" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                                 <label class="payment-option" style="
                                     padding: 12px;
@@ -2953,7 +3110,7 @@ class ShopApp {
                                 ">
                                     <input type="radio" name="payment-method" value="cash" style="display: none;" checked>
                                     <i class="fas fa-money-bill-wave" style="color: #10b981; font-size: 18px; margin-bottom: 4px;"></i>
-                                    <div style="font-weight: 600; font-size: 14px; color: #111827;">Cash</div>
+                                    <div style="font-weight: 600; font-size: 14px; color: #111827;"><span data-translate="cash">Cash</span></div>
                                 </label>
                                 <label class="payment-option" style="
                                     padding: 12px;
@@ -2966,21 +3123,21 @@ class ShopApp {
                                 ">
                                     <input type="radio" name="payment-method" value="paid" style="display: none;">
                                     <i class="fas fa-credit-card" style="color: #3b82f6; font-size: 18px; margin-bottom: 4px;"></i>
-                                    <div style="font-weight: 600; font-size: 14px; color: #111827;">Paid</div>
+                                    <div style="font-weight: 600; font-size: 14px; color: #111827;"><span data-translate="paid">Paid</span></div>
                                 </label>
                             </div>
                         </div>
 
                         <!-- Order Price -->
                         <div id="order-price-group" style="margin-bottom: 20px;">
-                            <label for="order-price" style="
+                            <label for="order-amount" style="
                                 display: block;
                                 font-weight: 600;
                                 color: #374151;
                                 margin-bottom: 8px;
                                 font-size: 14px;
-                            ">Order Price</label>
-                            <input type="number" id="order-price" name="price" step="0.01" min="0" placeholder="Enter price" style="
+                            "><span data-translate="orderAmount">Order Amount</span></label>
+                            <input type="number" id="order-amount" name="price" step="0.01" min="0" placeholder="Enter price" style="
                                 width: 100%;
                                 padding: 12px;
                                 border: 2px solid #e5e7eb;
@@ -3001,7 +3158,7 @@ class ShopApp {
                                 color: #374151;
                                 margin-bottom: 8px;
                                 font-size: 14px;
-                            ">Delivery Address *</label>
+                            "><span data-translate="deliveryAddress">Delivery Address</span> *</label>
                             <textarea id="delivery-address" name="address" rows="3" placeholder="Enter delivery address" required style="
                                 width: 100%;
                                 padding: 12px;
@@ -3023,7 +3180,7 @@ class ShopApp {
                                 color: #374151;
                                 margin-bottom: 8px;
                                 font-size: 14px;
-                            ">Phone *</label>
+                            "><span data-translate="phone">Phone</span> *</label>
                             <input type="tel" id="customer-phone" name="phone" placeholder="Enter phone number" required style="
                                 width: 100%;
                                 padding: 12px;
@@ -3112,7 +3269,7 @@ class ShopApp {
                                 color: #374151;
                                 margin-bottom: 8px;
                                 font-size: 14px;
-                            ">Notes (optional)</label>
+                            "><span data-translate="notes">Notes</span> (optional)</label>
                             <textarea id="order-notes" name="notes" rows="2" placeholder="Add notes..." style="
                                 width: 100%;
                                 padding: 12px;
@@ -3148,7 +3305,7 @@ class ShopApp {
                             font-size: 16px;
                             cursor: pointer;
                             transition: all 0.2s ease;
-                        ">Cancel</button>
+                        "><span data-translate="cancel">Cancel</span></button>
                         <button type="submit" class="submit-btn" form="create-order-form" style="
                             flex: 2;
                             padding: 12px;
@@ -3160,13 +3317,15 @@ class ShopApp {
                             font-size: 16px;
                             cursor: pointer;
                             transition: all 0.2s ease;
-                        ">Create Order</button>
+                        "><span data-translate="addOrder">Create Order</span></button>
                     </div>
                 </div>
             </div>
         `;
 
         document.body.appendChild(modal);
+        if (window.i18n) { try { window.i18n.applyTranslations(); window.i18n.translatePlaceholders && window.i18n.translatePlaceholders(); } catch (e) { console.warn('i18n modal apply error', e); } }
+
         document.body.style.overflow = 'hidden';
 
         // Bind modal events
@@ -3781,12 +3940,13 @@ class ShopApp {
                     this.reconnectTimeout = null;
                 }
 
-                // Authenticate with server
+                // Authenticate with server (include session token for resilience)
                 this.ws.send(JSON.stringify({
                     type: 'authenticate',
                     userId: shopId,
                     userType: 'shop',
-                    shopId: shopId
+                    shopId: shopId,
+                    sessionToken: this.sessionToken
                 }));
             };
 
@@ -5187,8 +5347,8 @@ class ShopApp {
                     ">
                         <i class="fas fa-plus" style="color: #9ca3af; font-size: 24px;"></i>
                     </div>
-                    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #374151;">Create Order</h3>
-                    <p style="margin: 0; color: #6b7280; font-size: 15px; line-height: 1.4;">Click to create order</p>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #374151;"><span data-translate="addOrder">Create Order</span></h3>
+                    <p style="margin: 0; color: #6b7280; font-size: 15px; line-height: 1.4;"><span data-translate="clickToCreateOrder">Click to create order</span></p>
                 </div>
 
                 <!-- Orders Section -->
@@ -5204,7 +5364,7 @@ class ShopApp {
                         padding: 20px 20px 16px;
                         border-bottom: 1px solid #e5e7eb;
                     ">
-                        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;">Orders</h3>
+                        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;"><span data-translate="orders">Orders</span></h3>
                     </div>
 
                     <!-- Modern Filter Tabs -->
@@ -5246,7 +5406,7 @@ class ShopApp {
                                     background: #f59e0b;
                                     border-radius: 50%;
                                 "></div>
-                                Pending
+                                <span data-translate="pending">Pending</span>
                             </button>
                             <button
                                 id="dashboard-accepted-tab"
@@ -5275,7 +5435,7 @@ class ShopApp {
                                     background: #3b82f6;
                                     border-radius: 50%;
                                 "></div>
-                                Accepted
+                                <span data-translate="accepted">Accepted</span>
                             </button>
                         </div>
                     </div>
@@ -5286,6 +5446,17 @@ class ShopApp {
                     </div>
                 </div>
             `;
+
+                // Apply translations to dashboard static UI
+                if (window.i18n) {
+                    try {
+                        window.i18n.applyTranslations && window.i18n.applyTranslations();
+                        if (typeof window.i18n.translatePlaceholders === 'function') {
+                            window.i18n.translatePlaceholders();
+                        }
+                    } catch (e) { console.warn('i18n apply on dashboard error', e); }
+                }
+
 
             // Load the orders content
             await this.loadDashboardOrdersContentFast();
@@ -5579,10 +5750,11 @@ class ShopApp {
                 contentArea.innerHTML = `
                     <div style="text-align: center; padding: 60px 20px; color: #6b7280;">
                         <i class="fas fa-history" style="font-size: 48px; margin-bottom: 16px; color: #d1d5db;"></i>
-                        <h3 style="margin: 0 0 8px 0; font-size: 18px; color: #374151;">No Completed Orders</h3>
-                        <p style="margin: 0; font-size: 14px;">Delivered orders will appear here</p>
+                        <h3 style="margin: 0 0 8px 0; font-size: 18px; color: #374151;"><span data-translate="noCompletedOrders">No Completed Orders</span></h3>
+                        <p style="margin: 0; font-size: 14px;"><span data-translate="deliveredOrdersAppear">Delivered orders will appear here</span></p>
                     </div>
                 `;
+                if (window.i18n) { try { window.i18n.applyTranslations && window.i18n.applyTranslations(); } catch(_){} }
                 return;
             }
 
@@ -5704,17 +5876,28 @@ class ShopApp {
 
             this.renderCompletedOrdersOptimized(contentArea, completedOrders);
 
+            // Apply translations to Orders (History) page UI labels
+            if (window.i18n) {
+                try {
+                    window.i18n.applyTranslations && window.i18n.applyTranslations();
+                    if (typeof window.i18n.translatePlaceholders === 'function') {
+                        window.i18n.translatePlaceholders();
+                    }
+                } catch (e) { console.warn('i18n apply on orders page error', e); }
+            }
+
+
         } catch (error) {
             console.error('Error loading completed orders:', error);
             contentArea.innerHTML = `
                 <div style="text-align: center; padding: 40px 20px; color: #ef4444;">
                     <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
-                    <h3 style="margin: 0 0 8px 0; font-size: 18px;">Failed to load completed orders</h3>
-                    <p style="margin: 0 0 16px 0; font-size: 14px;">Please try again</p>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px;"><span data-translate="failedToLoadCompletedOrders">Failed to load completed orders</span></h3>
+                    <p style="margin: 0 0 16px 0; font-size: 14px;"><span data-translate="pleaseTryAgain">Please try again</span></p>
                     <button onclick="shopApp.loadOrdersContent()" style="
                         background: #ff6b35; color: white; border: none; padding: 8px 16px;
                         border-radius: 6px; cursor: pointer; font-size: 14px;
-                    ">Retry</button>
+                    "><span data-translate="retry">Retry</span></button>
                 </div>
             `;
         }
@@ -7143,4 +7326,29 @@ let shopApp;
 // Initialize the shop app
 document.addEventListener('DOMContentLoaded', () => {
     shopApp = new ShopApp();
+    // Expose globally so translations.js can access sessionToken
+    window.shopApp = shopApp;
+
+    // Initialize i18n and ensure translations apply on change
+    if (window.i18n) {
+        try {
+            window.i18n.addObserver(() => {
+                try {
+                    window.i18n.applyTranslations();
+                    if (typeof window.i18n.translatePlaceholders === 'function') {
+                        window.i18n.translatePlaceholders();
+                    }
+                } catch (e) { console.warn('i18n apply error', e); }
+            });
+            // Load user language and apply initial translations
+            if (typeof window.i18n.init === 'function') {
+                window.i18n.init();
+            } else {
+                // Fallback if init not present
+                window.i18n.applyTranslations && window.i18n.applyTranslations();
+            }
+        } catch (e) {
+            console.warn('i18n init error', e);
+        }
+    }
 });

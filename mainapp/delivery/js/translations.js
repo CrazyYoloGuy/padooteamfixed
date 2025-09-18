@@ -16,6 +16,8 @@ const translations = {
         settings: "Settings",
         profile: "Profile",
         recent: "Recent",
+        teamMembers: "Team Members",
+        teamMembersManagement: "Team Members Management",
         
         // Home Page
         driverDashboard: "Driver Dashboard",
@@ -32,6 +34,7 @@ const translations = {
         
         // Recent Orders
         recentOrders: "Recent Orders",
+        yourLatestOrders: "Your latest delivery orders",
         noRecentOrders: "No recent orders",
         viewAllOrders: "View All Orders",
         
@@ -50,6 +53,9 @@ const translations = {
         month: "This Month",
         noOrders: "No orders found",
         orderDetails: "Order Details",
+        completedOrders: "Completed Orders",
+        allDeliveredOrdersWithDriverInfo: "All delivered orders with driver information",
+        manageYourDeliveryOrders: "Manage your delivery orders",
         // Orders page headers and states
         activeOrders: "Active Orders",
         liveOrders: "Live Orders",
@@ -111,13 +117,19 @@ const translations = {
         profileName: "Driver Name",
         profileEmail: "Email",
         logout: "Logout",
+        changePassword: "Change Password",
         accountInfo: "Account Info",
         memberSince: "Member Since",
         perOrder: "Per Order",
         account: "Account",
         support: "Support",
         helpCenter: "Help Center",
-        
+        announcementsTitle: "Announcements",
+        announcementsDesc: "Important updates from admins",
+        analytics: "Analytics",
+        analyticsDesc: "Insights and metrics (coming soon)",
+        accountAndPreferences: "Account and preferences",
+
         // Modals
         addOrderModal: "Add New Order",
         addShopModal: "Add New Shop",
@@ -255,9 +267,10 @@ const translations = {
         updating: "Updating...",
         completed: "Completed",
         pending: "Pending",
+        accepted: "Accepted",
         confirmed: "Confirmed",
         cancelled: "Cancelled",
-        
+
         // Quick Actions
         addNewOrder: "Add New Order",
         recordDelivery: "Record a new delivery order",
@@ -268,6 +281,11 @@ const translations = {
         // Empty States
         noOrdersYet: "No orders yet",
         ordersWillAppear: "Your orders will appear here",
+        noCompletedOrders: "No Completed Orders",
+        deliveredOrdersAppear: "Delivered orders will appear here",
+        failedToLoadCompletedOrders: "Failed to load completed orders",
+        pleaseTryAgain: "Please try again",
+        retry: "Retry",
         noNotificationsYet: "No notifications",
         notificationsWillAppear: "Your notifications will appear here",
         noShopsAdded: "No shops added yet",
@@ -319,6 +337,7 @@ const translations = {
         
         // Floating Button
         addOrderTooltip: "Add Order",
+        clickToCreateOrder: "Click to create order",
 
         // Language Settings
         languageSettings: "Language Settings",
@@ -346,6 +365,8 @@ const translations = {
         settings: "Ρυθμίσεις",
         profile: "Προφίλ",
         recent: "Πρόσφατα",
+        teamMembers: "Μέλη Ομάδας",
+        teamMembersManagement: "Διαχείριση Μελών Ομάδας",
         
         // Home Page
         driverDashboard: "Πίνακας Ελέγχου Οδηγού",
@@ -362,6 +383,7 @@ const translations = {
         
         // Recent Orders
         recentOrders: "Πρόσφατες Παραγγελίες",
+        yourLatestOrders: "Οι πιο πρόσφατες παραγγελίες σας",
         noRecentOrders: "Δεν υπάρχουν πρόσφατες παραγγελίες",
         viewAllOrders: "Προβολή Όλων των Παραγγελιών",
         
@@ -380,6 +402,9 @@ const translations = {
         month: "Αυτός ο Μήνας",
         noOrders: "Δεν βρέθηκαν παραγγελίες",
         orderDetails: "Λεπτομέρειες Παραγγελίας",
+        completedOrders: "Ολοκληρωμένες Παραγγελίες",
+        allDeliveredOrdersWithDriverInfo: "Όλες οι παραδομένες παραγγελίες με στοιχεία οδηγού",
+        manageYourDeliveryOrders: "Διαχειριστείτε τις παραγγελίες παράδοσης",
         // Επικεφαλίδες και καταστάσεις σελίδας Παραγγελιών
         activeOrders: "Ενεργές Παραγγελίες",
         liveOrders: "Ζωντανές Παραγγελίες",
@@ -441,12 +466,18 @@ const translations = {
         profileName: "Όνομα Οδηγού",
         profileEmail: "Email",
         logout: "Αποσύνδεση",
+        changePassword: "Αλλαγή Κωδικού",
         accountInfo: "Στοιχεία Λογαριασμού",
         memberSince: "Μέλος Από",
         perOrder: "Ανά Παραγγελία",
         account: "Λογαριασμός",
         support: "Υποστήριξη",
         helpCenter: "Κέντρο Βοήθειας",
+        announcementsTitle: "Ανακοινώσεις",
+        announcementsDesc: "Σημαντικές ενημερώσεις από διαχειριστές",
+        analytics: "Στατιστικά",
+        analyticsDesc: "Στατιστικά και μετρήσεις (σύντομα)",
+        accountAndPreferences: "Λογαριασμός και προτιμήσεις",
         
         // Modals
         addOrderModal: "Προσθήκη Νέας Παραγγελίας",
@@ -585,6 +616,7 @@ const translations = {
         updating: "Ενημέρωση...",
         completed: "Ολοκληρώθηκε",
         pending: "Εκκρεμεί",
+        accepted: "Αποδεκτές",
         confirmed: "Επιβεβαιώθηκε",
         cancelled: "Ακυρώθηκε",
         
@@ -598,6 +630,11 @@ const translations = {
         // Empty States
         noOrdersYet: "Δεν υπάρχουν παραγγελίες ακόμα",
         ordersWillAppear: "Οι παραγγελίες σας θα εμφανιστούν εδώ",
+        noCompletedOrders: "Δεν υπάρχουν ολοκληρωμένες παραγγελίες",
+        deliveredOrdersAppear: "Οι παραδομένες παραγγελίες θα εμφανιστούν εδώ",
+        failedToLoadCompletedOrders: "Αποτυχία φόρτωσης ολοκληρωμένων παραγγελιών",
+        pleaseTryAgain: "Παρακαλώ δοκιμάστε ξανά",
+        retry: "Επανάληψη",
         noNotificationsYet: "Δεν υπάρχουν ειδοποιήσεις",
         notificationsWillAppear: "Οι ειδοποιήσεις σας θα εμφανιστούν εδώ",
         noShopsAdded: "Δεν έχουν προστεθεί καταστήματα ακόμα",
@@ -649,6 +686,7 @@ const translations = {
         
         // Floating Button
         addOrderTooltip: "Προσθήκη Παραγγελίας",
+        clickToCreateOrder: "Πατήστε για δημιουργία παραγγελίας",
 
         // Language Settings
         languageSettings: "Ρυθμίσεις Γλώσσας",
@@ -726,8 +764,17 @@ class TranslationManager {
     async updateUserLanguageSettings(language) {
         try {
             // Get session token from the app instance or localStorage
-            const sessionToken = window.deliveryApp?.sessionToken || localStorage.getItem('deliveryAppSession');
-            
+            let sessionToken = window.deliveryApp?.sessionToken || localStorage.getItem('deliveryAppSession') || window.shopApp?.sessionToken;
+            if (!sessionToken) {
+                try {
+                    const ss = localStorage.getItem('shopSession');
+                    if (ss) sessionToken = JSON.parse(ss).sessionToken;
+                } catch (e) {}
+            }
+            if (!sessionToken) {
+                sessionToken = localStorage.getItem('deliveryAppShopSession');
+            }
+
             if (!sessionToken) {
                 console.warn('No session token available, skipping database update');
                 return { success: true, message: 'Language updated locally' };
@@ -739,11 +786,14 @@ class TranslationManager {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${sessionToken}`
                 },
-                body: JSON.stringify({
-                    language: language
-                })
+                body: JSON.stringify({ language })
             });
-            
+
+            if (response.status === 401) {
+                console.warn('Language settings update unauthorized (session likely expired). Keeping local change.');
+                return { success: true, message: 'Language updated locally (not persisted - please re-login)' };
+            }
+
             if (!response.ok) {
                 throw new Error('Failed to update language settings');
             }
@@ -759,8 +809,17 @@ class TranslationManager {
     async loadUserLanguageSettings() {
         try {
             // Get session token from the app instance or localStorage
-            const sessionToken = window.deliveryApp?.sessionToken || localStorage.getItem('deliveryAppSession');
-            
+            let sessionToken = window.deliveryApp?.sessionToken || localStorage.getItem('deliveryAppSession') || window.shopApp?.sessionToken;
+            if (!sessionToken) {
+                try {
+                    const ss = localStorage.getItem('shopSession');
+                    if (ss) sessionToken = JSON.parse(ss).sessionToken;
+                } catch (e) {}
+            }
+            if (!sessionToken) {
+                sessionToken = localStorage.getItem('deliveryAppShopSession');
+            }
+
             if (!sessionToken) {
                 console.warn('No session token available, using local language settings');
                 return;

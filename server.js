@@ -38,6 +38,11 @@ const activeSessions = new Map(); // userId -> sessionData
 const sessionTokens = new Map(); // sessionToken -> userId
 
 // Session management functions
+// Helper: simple UUID format check (v1–v5 and variants)
+function isUuidLike(id) {
+    return typeof id === 'string' && /^(\{)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(\})?$/.test(id);
+}
+
 function createSession(userId, userType, sessionToken) {
     const sessionData = {
         userId,
@@ -127,9 +132,13 @@ wss.on('connection', (ws, req) => {
                 const userId = data.userId;
                 const userType = data.userType; // 'driver' or 'shop'
                 const shopId = data.shopId; // for shop users
+                const providedToken = data.sessionToken;
 
-                // Validate session for WebSocket connection
-                const session = getUserSession(userId);
+                // Validate session for WebSocket connection (support token-based reattach after server restart)
+                let session = getUserSession(userId);
+                if (!session && providedToken) {
+                    session = validateSession(providedToken);
+                }
                 if (!session) {
                     console.log(`❌ WebSocket authentication rejected: No active session for ${userType} ${userId}`);
                     ws.send(JSON.stringify({
@@ -141,9 +150,9 @@ wss.on('connection', (ws, req) => {
 
                 // Store client with user info
                 clients.set(ws, {
-                    userId: userId,
-                    userType: userType,
-                    shopId: shopId,
+                    userId: session.userId || userId,
+                    userType: session.userType || userType,
+                    shopId: shopId ? parseInt(shopId) : undefined,
                     sessionToken: session.sessionToken
                 });
 
@@ -431,8 +440,10 @@ function authenticateUser(req, res, next) {
                 console.log(`✅ Session validated for ${session.userType} ${userId}`);
             } else {
                 console.log('❌ Invalid or expired session token');
+                // Provide a hint to clients to re-auth via WebSocket using sessionToken
                 return res.status(401).json({
                     success: false,
+                    code: 'SESSION_EXPIRED',
                     message: 'Session expired. Please log in again.'
                 });
             }
@@ -860,8 +871,12 @@ app.post('/api/admin/shop-accounts', async (req, res) => {
 app.put('/api/admin/shop-accounts/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { shop_name, contact_person, phone, address, afm, category_id, status } = req.body;
+        const { shop_name, contact_person, phone, address, afm, category_id, status, driver_earning_per_order } = req.body;
         const updates = { shop_name, contact_person, phone, address, afm, category_id: category_id ? parseInt(category_id) : undefined, status, updated_at: new Date().toISOString() };
+        if (driver_earning_per_order !== undefined && driver_earning_per_order !== null && driver_earning_per_order !== '') {
+            const val = parseFloat(driver_earning_per_order);
+            if (!isNaN(val) && val >= 0) updates.driver_earning_per_order = val;
+        }
         const { data, error } = await supabase
             .from('shop_accounts')
             .update(updates)
@@ -3014,9 +3029,22 @@ app.get('/api/shop/:shopId/analytics', authenticateUser, async (req, res) => {
             return res.status(500).json({ success: false, message: 'Failed to load analytics orders' });
         }
 
+        // Get the exact total count for the day (independent of pagination)
+        const { count: totalCount, error: countError } = await supabase
+            .from('shop_orders')
+            .select('*', { count: 'exact', head: true })
+            .eq('shop_account_id', shopId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO);
+        if (countError) {
+            console.warn('Count query failed, falling back to page length:', countError);
+        }
+
         const ordersAll = data || [];
 
         // Build summary metrics
+        const exactTotal = (typeof totalCount === 'number') ? totalCount : ordersAll.length;
         let totalRevenue = 0;
         let totalDriverEarnings = 0;
         const perHour = Array.from({ length: 24 }, () => 0);
@@ -3068,7 +3096,7 @@ app.get('/api/shop/:shopId/analytics', authenticateUser, async (req, res) => {
 
         const summary = {
             date: selectedDate,
-            total_orders: ordersAll.length,
+            total_orders: exactTotal,
             total_revenue: Number(totalRevenue.toFixed(2)),
             total_driver_earnings: Number(totalDriverEarnings.toFixed(2)),
             per_hour: perHour,
@@ -3663,6 +3691,9 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
 app.put('/api/driver/:driverId/notifications/:notificationId/read', async (req, res) => {
     try {
         const { driverId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
 
         console.log(`Marking notification ${notificationId} as read for driver ${driverId}`);
 
@@ -3735,6 +3766,9 @@ app.put('/api/driver/:driverId/notifications/read-all', async (req, res) => {
 app.put('/api/driver/:driverId/notifications/:notificationId/confirm', async (req, res) => {
     try {
         const { driverId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
         console.log(`Confirming notification ${notificationId} for driver ${driverId}`);
 
         // 1) Load notification (including order_id)
@@ -3919,6 +3953,9 @@ app.put('/api/driver/:driverId/notifications/:notificationId/confirm', async (re
 app.put('/api/driver/:driverId/notifications/:notificationId', async (req, res) => {
     try {
         const { driverId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
         const { message } = req.body;
 
         console.log(`Editing notification ${notificationId} for driver ${driverId}`);
@@ -4013,6 +4050,9 @@ app.put('/api/driver/:driverId/notifications/:notificationId', async (req, res) 
 app.put('/api/shop/:shopId/notifications/:notificationId', async (req, res) => {
     try {
         const { shopId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
         const { message } = req.body;
 
         console.log(`Editing shop notification ${notificationId} for shop ${shopId}`);
@@ -4177,6 +4217,9 @@ app.get('/api/shop/:shopId/notifications', async (req, res) => {
 app.put('/api/shop/:shopId/notifications/:notificationId/read', async (req, res) => {
     try {
         const { shopId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
 
         console.log(`Marking shop notification ${notificationId} as read for shop ${shopId}`);
 
@@ -4270,6 +4313,9 @@ app.get('/api/shop/:shopId/all-notifications', async (req, res) => {
 app.delete('/api/shop/:shopId/notifications/:notificationId', async (req, res) => {
     try {
         const { shopId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
 
         console.log(`Deleting notification ${notificationId} for shop ${shopId}`);
 
@@ -4390,6 +4436,9 @@ app.delete('/api/shop/:shopId/notifications/:notificationId', async (req, res) =
 app.delete('/api/driver/:driverId/notifications/:notificationId', async (req, res) => {
     try {
         const { driverId, notificationId } = req.params;
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
 
         console.log(`Driver ${driverId} deleting notification ${notificationId}`);
 
@@ -4516,10 +4565,21 @@ app.get('/api/user/settings', authenticateUser, async (req, res) => {
             return res.status(401).json({ error: 'User not authenticated' });
         }
 
+        // If non-UUID user (e.g., shop user with numeric ID), return defaults and skip DB to avoid 22P02
+        if (!isUuidLike(req.user.id)) {
+            return res.json({
+                user_id: req.user.id,
+                earnings_per_order: 1.50,
+                language: 'en',
+                notificationSettings: { soundEnabled: true, browserEnabled: false },
+                notification_settings: { soundEnabled: true, browserEnabled: false }
+            });
+        }
+
         // Set user context for RLS policies
         await supabase.rpc('set_request_user_id', { user_id: req.user.id });
 
-        // Use raw SQL query to bypass RLS
+        // Query user settings
         const { data, error } = await supabase
             .from('user_settings')
             .select('*')
@@ -4593,6 +4653,17 @@ app.patch('/api/user/settings', authenticateUser, async (req, res) => {
         // Validate the updates
         if (!updates || typeof updates !== 'object') {
             return res.status(400).json({ error: 'Invalid settings data' });
+        }
+
+        // If non-UUID user (e.g., shop user id like "8"), don't hit user_settings (UUID column)
+        if (!isUuidLike(req.user.id)) {
+            const resp = {
+                user_id: req.user.id,
+                earnings_per_order: parseFloat(updates.earnings_per_order ?? 1.50),
+                language: ['en','gr'].includes(updates.language) ? updates.language : 'en',
+                updated_at: new Date().toISOString()
+            };
+            return res.json(resp);
         }
 
         // Set user context for RLS policies
@@ -4831,6 +4902,10 @@ app.put('/api/user/orders/:id', authenticateUser, async (req, res) => {
 app.put('/api/shop/:shopId/notifications/:notificationId', async (req, res) => {
     try {
         const { shopId, notificationId } = req.params;
+        // Guard against non-UUID IDs (e.g., timer-ended-123-<ts>) to avoid 22P02
+        if (!isUuidLike(notificationId)) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
         const { message } = req.body;
         if (!message || !message.trim()) {
             return res.status(400).json({ success: false, message: 'Message is required' });
@@ -5874,8 +5949,24 @@ app.post('/api/orders/accept', authenticateUser, async (req, res) => {
                     driverUser = du || null;
                 } catch (_) {}
 
-                // Load driver's default earnings and set on order if missing
+                // Determine earnings per order priority: Shop override > Driver default > 1.50
+                let shopEarning = null;
                 let defaultEarning = null;
+                try {
+                    if (orderData.shop_account_id) {
+                        const { data: se } = await supabase
+                            .from('shop_accounts')
+                            .select('driver_earning_per_order')
+                            .eq('id', orderData.shop_account_id)
+                            .maybeSingle();
+                        if (se && se.driver_earning_per_order != null) {
+                            const v = parseFloat(se.driver_earning_per_order);
+                            if (!isNaN(v) && v >= 0) shopEarning = v;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Could not fetch shop earning override:', e);
+                }
                 try {
                     const { data: ds } = await supabase
                         .from('user_settings')
@@ -5888,7 +5979,7 @@ app.post('/api/orders/accept', authenticateUser, async (req, res) => {
                 }
                 try {
                     if (!orderData.driver_earnings || Number(orderData.driver_earnings) <= 0) {
-                        const earningToSet = defaultEarning != null ? defaultEarning : 1.50;
+                        const earningToSet = (shopEarning != null ? shopEarning : (defaultEarning != null ? defaultEarning : 1.50));
                         await supabase
                             .from('shop_orders')
                             .update({ driver_earnings: earningToSet })

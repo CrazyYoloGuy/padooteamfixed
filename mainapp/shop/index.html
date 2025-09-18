@@ -17,7 +17,7 @@
     <!-- Mobile App Switcher -->
     <meta name="format-detection" content="telephone=no">
     <meta name="msapplication-TileColor" content="#f59e0b">
-    <meta name="msapplication-TileImage" content="/plogo.png">
+    <meta name="msapplication-TileImage" content="/icons/plogo.png">
     <meta name="msapplication-tap-highlight" content="no">
     <meta name="apple-touch-fullscreen" content="yes">
     <meta name="apple-mobile-web-app-oriented" content="portrait">
@@ -45,8 +45,8 @@
     <link rel="manifest" href="/manifest.json">
 
     <!-- Icons -->
-    <link rel="icon" href="/plogo.png">
-    <link rel="apple-touch-icon" href="/plogo.png">
+    <link rel="icon" href="/icons/plogo.png">
+    <link rel="apple-touch-icon" href="/icons/plogo.png">
 
     <!-- Standalone Mode Styles -->
     <link rel="stylesheet" href="/standalone-mode.css">
@@ -95,7 +95,7 @@
                         justify-content: center;
                         overflow: hidden;
                     ">
-                        <img src="/plogo.png" alt="Padoo Delivery" style="
+                        <img src="/icons/plogo.png" alt="Padoo Delivery" style="
                             width: 100%;
                             height: 100%;
                             object-fit: contain;
@@ -119,7 +119,7 @@
         <div id="alerts-page" class="page active">
             <div class="page-header">
                 <div class="header-content">
-                    <h2>Team Members Management</h2>
+                    <h2><span data-translate="teamMembersManagement">Team Members Management</span></h2>
                     <div class="header-badge">
                         <span class="notification-count">0</span>
                     </div>
@@ -174,7 +174,7 @@
         <div id="orders-page" class="page">
             <div class="page-header">
                 <div class="header-content">
-                    <h2>Order History</h2>
+                    <h2><span data-translate="history">Order History</span></h2>
                 </div>
             </div>
 
@@ -208,8 +208,8 @@
                             <i class="fas fa-history" style="color: #16a34a; font-size: 18px;"></i>
                         </div>
                         <div>
-                            <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;">Completed Orders</h3>
-                            <p style="margin: 0; font-size: 14px; color: #6b7280;">All delivered orders with driver information</p>
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;"><span data-translate="completedOrders">Completed Orders</span></h3>
+                            <p style="margin: 0; font-size: 14px; color: #6b7280;"><span data-translate="allDeliveredOrdersWithDriverInfo">All delivered orders with driver information</span></p>
                         </div>
                     </div>
 
@@ -239,7 +239,7 @@
         <!-- Profile Page -->
         <div id="profile-page" class="page">
             <div class="page-header">
-                <h2>Shop Profile</h2>
+                <h2 data-translate="profileTitle">Shop Profile</h2>
             </div>
 
             <div class="profile-container">
@@ -257,15 +257,20 @@
                     <div class="profile-actions">
                         <button class="btn primary" id="change-password-btn">
                             <i class="fas fa-key"></i>
-                            Change Password
+                            <span data-translate="changePassword">Change Password</span>
                         </button>
+
                         <button class="btn secondary logout-btn">
                             <i class="fas fa-sign-out-alt"></i>
-                            Logout
+                            <span data-translate="logout">Logout</span>
                         </button>
                     </div>
                 </div>
             </div>
+
+
+
+
         </div>
 
         <!-- Announcements Page -->
@@ -359,8 +364,8 @@
         <!-- Dashboard Page (Orders with Create + Recent Orders) -->
         <div id="dashboard-page" class="page">
             <div class="page-header">
-                <h2>Orders</h2>
-                <p style="color: #6b7280; font-size: 14px; margin: 8px 0 0 0;">Manage your delivery orders</p>
+                <h2><span data-translate="orders">Orders</span></h2>
+                <p style="color: #6b7280; font-size: 14px; margin: 8px 0 0 0;"><span data-translate="manageYourDeliveryOrders">Manage your delivery orders</span></p>
             </div>
 
             <div class="page-content" style="padding: 20px;">
@@ -372,29 +377,58 @@
         <div class="bottom-nav">
             <button class="nav-item active" data-page="alerts">
                 <i class="fas fa-users"></i>
-                <span>Team Members</span>
+                <span data-translate="teamMembers">Team Members</span>
             </button>
             <button class="nav-item" data-page="orders">
                 <i class="fas fa-history"></i>
-                <span>History</span>
+                <span data-translate="history">History</span>
             </button>
             <button class="nav-item" data-page="dashboard">
                 <i class="fas fa-shopping-bag"></i>
-                <span>Orders</span>
+                <span data-translate="orders">Orders</span>
             </button>
             <button class="nav-item" data-page="settings">
                 <i class="fas fa-cog"></i>
-                <span>Settings</span>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        try {
+          if (window.i18n) {
+            if (typeof window.i18n.init === 'function') window.i18n.init();
+            const display = document.getElementById('current-language-display');
+            const updateDisplay = (lang) => {
+              if (display) display.textContent = (lang === 'gr') ? 'Ελληνικά' : 'English';
+              const enBtn = document.getElementById('lang-en');
+              const grBtn = document.getElementById('lang-gr');
+              if (enBtn && grBtn) {
+                enBtn.classList.toggle('active', lang === 'en');
+                grBtn.classList.toggle('active', lang === 'gr');
+              }
+            };
+            const currentLang = (window.i18n.getCurrentLanguage && window.i18n.getCurrentLanguage()) || localStorage.getItem('app_language') || 'en';
+            updateDisplay(currentLang);
+            if (typeof window.i18n.addObserver === 'function') window.i18n.addObserver(updateDisplay);
+          }
+          const en = document.getElementById('lang-en');
+          const gr = document.getElementById('lang-gr');
+          if (en) en.addEventListener('click', () => window.i18n && window.i18n.setLanguage('en'));
+          if (gr) gr.addEventListener('click', () => window.i18n && window.i18n.setLanguage('gr'));
+        } catch (e) { console.warn('Language init error', e); }
+      });
+    </script>
+
+                <span data-translate="settings">Settings</span>
             </button>
             <button class="nav-item" data-page="profile">
                 <i class="fas fa-user"></i>
-                <span>Profile</span>
+                <span data-translate="profile">Profile</span>
             </button>
         </div>
     </div>
 
     <!-- Toast Container -->
     <div id="toast-container"></div>
+
+    <script src="/mainapp/delivery/js/translations.js"></script>
 
     <script src="/mainapp/shop/js/app.js"></script>
 

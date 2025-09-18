@@ -500,6 +500,9 @@ class Dashboard {
                     <button class="action-btn password" onclick="dashboard.changeShopPassword('${shop.id}')" title="Reset Password">
                         <i class="fas fa-key"></i>
                     </button>
+                    <button class="action-btn money" onclick="openShopEarningsOverride('${shop.id}')" title="Set driver earning per order">
+                        <i class="fas fa-dollar-sign"></i>
+                    </button>
                     <button class="action-btn delete" onclick="dashboard.deleteShop('${shop.id}')" title="Delete Shop">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -735,6 +738,9 @@ class Dashboard {
                     </button>
                     <button class="action-btn password" onclick="dashboard.changeShopPassword('${shop.id}')" title="Reset Password">
                         <i class="fas fa-key"></i>
+                    </button>
+                    <button class="action-btn money" onclick="openShopEarningsOverride('${shop.id}')" title="Set driver earning per order">
+                        <i class="fas fa-dollar-sign"></i>
                     </button>
                     <button class="action-btn delete" onclick="dashboard.deleteShop('${shop.id}')" title="Delete Shop">
                         <i class="fas fa-trash"></i>
@@ -1662,6 +1668,9 @@ class Dashboard {
                 this.updateStats();
             } else {
                 throw new Error(result.message || 'Failed to delete shop');
+
+
+
             }
         } catch (error) {
             console.error('Error deleting shop:', error);
@@ -1729,6 +1738,9 @@ class Dashboard {
             <div class="toast-content">
                 <div class="toast-message">${message}</div>
             </div>
+
+
+
         `;
 
         container.appendChild(toast);
@@ -1800,6 +1812,9 @@ class Dashboard {
         // Add All Users section if not present
         if (!document.getElementById('all-users-section')) {
             const section = document.createElement('section');
+
+
+
             section.id = 'all-users-section';
             section.className = 'content-section';
             section.innerHTML = `
@@ -3890,6 +3905,80 @@ function openDriverAnnouncementViewsModal(announcementId) {
 }
 
 
+// Global helper to set per-shop driver earning (used by Shops cards)
+function openShopEarningsOverride(shopId) {
+    try {
+        const dash = window.dashboard;
+        const shop = dash && Array.isArray(dash.shops) ? dash.shops.find(s => String(s.id) === String(shopId)) : null;
+        const current = shop && shop.driver_earning_per_order != null ? Number(shop.driver_earning_per_order) : '';
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        const uid = 'earn-' + Math.random().toString(36).slice(2);
+        overlay.innerHTML = `
+            <div class="modal" style="max-width:520px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-dollar-sign"></i> Set driver earning per order</h3>
+                    <button class="modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="${uid}" style="font-weight:700; color:#222; display:flex; align-items:center; gap:8px;">
+                            <i class="fas fa-store" style="color:var(--primary-color);"></i> ${shop ? (shop.shop_name || 'Shop') : 'Shop'}
+                        </label>
+                        <input type="number" step="0.01" min="0" id="${uid}" placeholder="e.g. 2.00" value="${current}"
+                               style="background:#f8fafc; border-radius:10px; border:1.5px solid var(--border); font-size:15px; padding:12px 14px; margin-top:6px;">
+                        <small style="color:#64748b;">This overrides the driver's default earning for orders from this shop. Leave blank to remove override.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn secondary modal-close">Cancel</button>
+                    <button class="btn primary" id="save-${uid}"><i class="fas fa-save"></i> Save</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden';
+        overlay.classList.add('active');
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); document.body.style.overflow = 'auto'; } });
+        overlay.querySelectorAll('.modal-close').forEach(btn => btn.addEventListener('click', () => { overlay.remove(); document.body.style.overflow = 'auto'; }));
+        const saveBtn = overlay.querySelector(`#save-${uid}`);
+        saveBtn.addEventListener('click', async () => {
+            const valStr = (overlay.querySelector(`#${uid}`).value || '').trim();
+            let payload = {};
+            if (valStr === '') {
+                payload.driver_earning_per_order = null; // remove override
+            } else {
+                const num = parseFloat(valStr);
+                if (isNaN(num) || num < 0) {
+                    dash && dash.showToast ? dash.showToast('Please enter a valid non-negative number', 'error') : alert('Please enter a valid non-negative number');
+                    return;
+                }
+                payload.driver_earning_per_order = Number(num.toFixed(2));
+            }
+            try {
+                const resp = await fetch(`/api/admin/shop-accounts/${shopId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+                if (!resp.ok || !result.success) throw new Error(result.message || `Failed (${resp.status})`);
+                dash && dash.showToast ? dash.showToast('Earning per order saved', 'success') : alert('Saved');
+                overlay.remove();
+                document.body.style.overflow = 'auto';
+                if (dash) { await dash.loadShops(); dash.renderShops(); }
+            } catch (e) {
+                console.error('Failed saving earning override:', e);
+                dash && dash.showToast ? dash.showToast('Failed to save', 'error') : alert('Failed to save');
+            }
+        });
+    } catch (e) {
+        console.error('Error opening earnings modal:', e);
+        const dash = window.dashboard;
+        dash && dash.showToast ? dash.showToast('Failed to open modal', 'error') : alert('Failed to open modal');
+    }
+}
+
+
 // Expose Dashboard class and Driver Announcements helpers globally
 if (typeof window !== 'undefined') {
     window.Dashboard = Dashboard;
@@ -3900,6 +3989,7 @@ if (typeof window !== 'undefined') {
     window.renderDriverAnnouncements = renderDriverAnnouncements;
     window.deleteDriverAnnouncement = deleteDriverAnnouncement;
     window.openDriverAnnouncementViewsModal = openDriverAnnouncementViewsModal;
+    window.openShopEarningsOverride = openShopEarningsOverride;
 
     console.log('✅ Dashboard class and helpers exposed globally');
     console.log('Dashboard available:', typeof window.Dashboard);

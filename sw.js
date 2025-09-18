@@ -228,13 +228,7 @@ self.addEventListener('push', (event) => {
       userId: notificationData.userId || (notificationData.data && notificationData.data.userId) || null,
       ...notificationData.data
     },
-    actions: [
-      {
-        action: 'accept',
-        title: '✅ Accept Order',
-        icon: '/icons/icon-192x192.png'
-      }
-    ]
+    actions: []
   };
 
   // Show notification with enhanced error handling
@@ -411,12 +405,7 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  if (event.action === 'accept') {
-    console.log('[SW] Order accepted via notification');
-    // Handle order acceptance
-    event.waitUntil(handleOrderAcceptance(notificationData));
-    return;
-  }
+
 
   // Handle view action or general notification click
   const urlToOpen = notificationData.url || '/mainapp/delivery';
