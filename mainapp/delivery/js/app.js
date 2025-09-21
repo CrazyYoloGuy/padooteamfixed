@@ -6788,21 +6788,14 @@ class DeliveryApp {
         // Determine payment method (prefer structured field)
         const paymentMethod = (notification.payment_method) ? notification.payment_method : ((Number(amount) > 0) ? 'Cash' : 'Card');
 
-        // Parse preparation time for icon and display
-        const prepTimeIcon = preparationTime.includes('Ready Now') ? 'bolt' :
-                           preparationTime.includes('5 minutes') ? 'clock' :
-                           preparationTime.includes('10 minutes') ? 'hourglass-half' :
-                           preparationTime.includes('15 minutes') ? 'pause-circle' : 'clock';
+        // Parse preparation time for icon and display (generalized)
+        const parsedMinutes = (typeof notification.preparation_time === 'number' && !isNaN(notification.preparation_time))
+            ? notification.preparation_time
+            : (() => { const m = (preparationTime || '').match(/(\d+)/); return m ? parseInt(m[1], 10) : 0; })();
 
-        const prepTimeColor = preparationTime.includes('Ready Now') ? '#10b981' :
-                            preparationTime.includes('5 minutes') ? '#f59e0b' :
-                            preparationTime.includes('10 minutes') ? '#3b82f6' :
-                            preparationTime.includes('15 minutes') ? '#ef4444' : '#f59e0b';
-
-        const prepTimeText = preparationTime.includes('Ready Now') ? 'Now' :
-                           preparationTime.includes('5 minutes') ? '5 min' :
-                           preparationTime.includes('10 minutes') ? '10 min' :
-                           preparationTime.includes('15 minutes') ? '15 min' : preparationTime;
+        const prepTimeText = parsedMinutes <= 0 ? 'Now' : `${parsedMinutes} min`;
+        const prepTimeIcon = parsedMinutes <= 0 ? 'bolt' : (parsedMinutes <= 5 ? 'clock' : (parsedMinutes <= 10 ? 'hourglass-half' : 'pause-circle'));
+        const prepTimeColor = parsedMinutes <= 0 ? '#10b981' : (parsedMinutes <= 5 ? '#f59e0b' : (parsedMinutes <= 10 ? '#3b82f6' : '#ef4444'));
 
         return `
             <div style="
