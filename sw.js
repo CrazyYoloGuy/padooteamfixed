@@ -212,7 +212,7 @@ self.addEventListener('push', (event) => {
     icon: '/icons/icon-192x192.png',
     badge: '/icons/plogo.png',
     image: notificationData.image || null,
-    tag: 'padoo-order-' + (notificationData.notificationId || Date.now()),
+    tag: 'padoo-order-' + (notificationData.notificationId || notificationData.order_id || notificationData.orderId || (notificationData.data && (notificationData.data.order_id || notificationData.data.orderId)) || 'generic'),
     renotify: true,
     requireInteraction: true,
     silent: false, // Ensure sound is enabled
@@ -259,8 +259,11 @@ self.addEventListener('push', (event) => {
         {
           body: 'Tap to view your new delivery order',
           icon: '/icons/icon-192x192.png',
+          tag: 'padoo-order-' + (notificationData.notificationId || notificationData.order_id || notificationData.orderId || (notificationData.data && (notificationData.data.order_id || notificationData.data.orderId)) || 'generic'),
+          renotify: true,
           requireInteraction: true,
-          vibrate: [300, 200, 300]
+          vibrate: [300, 200, 300],
+          data: { url: notificationData.url || '/mainapp/delivery' }
         }
       );
     })
@@ -440,11 +443,13 @@ self.addEventListener('notificationclick', (event) => {
 
         // App not open, open new window with specific parameters
         let finalUrl = urlToOpen;
+        // Always direct to Orders page on notification clicks
+        finalUrl += `${finalUrl.includes('?') ? '&' : '?'}page=orders`;
         if (notificationId) {
-          finalUrl += `?notification=${notificationId}`;
+          finalUrl += `&notification=${encodeURIComponent(notificationId)}`;
         }
         if (orderId) {
-          finalUrl += `${finalUrl.includes('?') ? '&' : '?'}order=${orderId}`;
+          finalUrl += `&order=${encodeURIComponent(orderId)}`;
         }
 
         console.log('[SW] Opening new app window:', finalUrl);

@@ -493,9 +493,20 @@ class DeliveryApp {
         // Setup push notifications
         await this.setupPushNotifications();
 
-        // Navigate to home page
-        this.navigateToPage('home');
+        // Decide initial page based on URL params from notification click
+        const params = new URLSearchParams(window.location.search || '');
+        const pageParam = params.get('page');
+        const orderParam = params.get('order');
+        let initialPage = 'home';
+        if (pageParam === 'orders' || orderParam) {
+            initialPage = 'orders';
+            this.currentOrdersView = 'active';
+        }
+        this.navigateToPage(initialPage);
         this.updateUI();
+        if (initialPage === 'orders' && orderParam) {
+            setTimeout(() => this.highlightOrder(orderParam), 800);
+        }
 
         await this.fetchInitialNotifications();
 
@@ -9643,6 +9654,11 @@ class DeliveryApp {
             }
             this.fetchNotificationCount();
         }
+        // If we're on Orders -> Active view, refresh the list so new orders appear live
+        if (this.currentPage === 'orders' && this.currentOrdersView === 'active') {
+            this.renderOrders();
+        }
+
 
         // Update notification count
         this.updateNotificationBadge(this.notifications.filter(n => !n.is_read).length);
@@ -10308,26 +10324,21 @@ class DeliveryApp {
         console.log('Handling notification click:', data);
 
         const notificationId = data.notificationId || data;
-        const { orderId, action, shopName } = data;
+        const { orderId, shopName } = data;
 
-        // Always just open the app. Do NOT accept or prompt to accept from notification click
+        // Always open Orders page (Active). Do NOT accept from notification click
+        this.currentOrdersView = 'active';
+        this.navigateToPage('orders');
+        // Ensure the list renders immediately
+        this.renderOrders();
+
+        // Highlight the pushed order if present
         if (orderId) {
-            // Navigate to orders page and highlight specific order
-            this.navigateToPage('orders');
             setTimeout(() => {
                 this.highlightOrder(orderId);
-            }, 500);
-        } else {
-            // Default: navigate to notifications page
-            this.navigateToPage('notifications');
+            }, 600);
         }
 
-        // Mark notification as read if ID provided
-        if (notificationId) {
-            setTimeout(() => {
-                this.confirmNotification(notificationId);
-            }, 500);
-        }
 
         // Show toast with context
         if (shopName) {
