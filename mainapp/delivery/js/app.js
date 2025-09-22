@@ -2226,11 +2226,20 @@ class DeliveryApp {
     // Load History (delivered status)
     async loadHistoryContent(container) {
         const acceptedOrders = await this.loadAcceptedOrders();
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000; // last 24 hours
+
+        // Working-day window: 03:00 to next day 02:59:59.999
+        const now = new Date();
+        const windowStart = new Date(now);
+        if (now.getHours() < 3) {
+            windowStart.setDate(windowStart.getDate() - 1);
+        }
+        windowStart.setHours(3, 0, 0, 0);
+        const windowEnd = new Date(windowStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+
         const historyOrders = acceptedOrders.filter(order => {
             if (!order || order.status !== 'delivered') return false;
             const ts = new Date(order.delivery_time || order.updated_at || order.created_at).getTime();
-            return !isNaN(ts) && ts >= cutoff;
+            return !isNaN(ts) && ts >= windowStart.getTime() && ts <= windowEnd.getTime();
         });
 
         if (historyOrders.length === 0) {
@@ -2244,13 +2253,17 @@ class DeliveryApp {
             return;
         }
 
-        // Compute per-day numbering for TODAY'S DELIVERED orders only (by delivery time)
-        const start = new Date(); start.setHours(0,0,0,0);
-        const end = new Date(); end.setHours(23,59,59,999);
+        // Compute per-shift numbering for delivered orders in current 03:00→03:00 window (by delivery time)
+        const shiftStart = new Date(now);
+        if (now.getHours() < 3) {
+            shiftStart.setDate(shiftStart.getDate() - 1);
+        }
+        shiftStart.setHours(3, 0, 0, 0);
+        const shiftEnd = new Date(shiftStart.getTime() + 24 * 60 * 60 * 1000 - 1);
         const todaysDelivered = (acceptedOrders || []).filter(o => {
             if (!o || o.status !== 'delivered') return false;
             const t = new Date(o.delivery_time || o.updated_at || o.created_at);
-            return !isNaN(t) && t >= start && t <= end;
+            return !isNaN(t) && t >= shiftStart && t <= shiftEnd;
         }).sort((a,b)=> new Date(a.delivery_time || a.updated_at || a.created_at) - new Date(b.delivery_time || b.updated_at || b.created_at));
         const dayIndexMap = new Map(); todaysDelivered.forEach((o,i)=> dayIndexMap.set(o.id, i+1));
 
@@ -10297,11 +10310,8 @@ class DeliveryApp {
         const notificationId = data.notificationId || data;
         const { orderId, action, shopName } = data;
 
-        // Navigate to appropriate page based on action
-        if (action === 'accept' && orderId) {
-            // Show order acceptance UI
-            this.showOrderAcceptanceModal(orderId, shopName);
-        } else if (orderId) {
+        // Always just open the app. Do NOT accept or prompt to accept from notification click
+        if (orderId) {
             // Navigate to orders page and highlight specific order
             this.navigateToPage('orders');
             setTimeout(() => {
