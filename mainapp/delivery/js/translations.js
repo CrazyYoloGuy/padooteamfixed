@@ -346,7 +346,13 @@ const translations = {
         selectLanguage: "Select Language",
         english: "English",
         greek: "Greek",
-        languageModal: "Language Selection"
+        languageModal: "Language Selection",
+        // Fixing Tools (Shop)
+        fixing: "Fixing",
+        fixingDesc: "Find and fix pending orders not shown to drivers",
+        fixOrder: "Fix Order",
+        fixSelectedOrder: "Fix Selected",
+        fixOrdersHelper: "Shows pending orders older than 2 minutes. Select one to re-send to your team so it appears to drivers."
     },
     
     gr: {
@@ -695,7 +701,13 @@ const translations = {
         selectLanguage: "Επιλογή Γλώσσας",
         english: "Αγγλικά",
         greek: "Ελληνικά",
-        languageModal: "Επιλογή Γλώσσας"
+        languageModal: "Επιλογή Γλώσσας",
+        // Fixing Tools (Shop)
+        fixing: "Επιδιόρθωση",
+        fixingDesc: "Εντοπισμός και διόρθωση εκκρεμών παραγγελιών που δεν εμφανίζονται",
+        fixOrder: "Επιδιόρθωση Παραγγελίας",
+        fixSelectedOrder: "Επιδιόρθωση Επιλεγμένης",
+        fixOrdersHelper: "Εμφανίζει εκκρεμείς παραγγελίες άνω των 2 λεπτών. Επιλέξτε μία για επαναποστολή στην ομάδα ώστε να εμφανιστεί στους οδηγούς."
     }
 };
 

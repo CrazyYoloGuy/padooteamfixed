@@ -1250,6 +1250,116 @@ class ShopApp {
         }
 
 
+        // Fixing tools: show modal, list stale pending orders (>2m), allow fix
+        openFixingModal() {
+            try {
+                const existing = document.getElementById('fixing-modal');
+                if (existing) existing.remove();
+                const t = (k,f)=> (window.t ? window.t(k) : f);
+                const modal = document.createElement('div');
+                modal.id = 'fixing-modal';
+                modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+                modal.innerHTML = `
+                    <div style="width:min(720px,95vw);background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.15)">
+                        <div style="padding:16px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
+                            <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;" data-translate="fixOrder">Fix Order</h3>
+                            <button class="close-fixing" style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;">×</button>
+                        </div>
+                        <div style="padding:14px 18px;color:#6b7280;font-size:13px;" data-translate="fixOrdersHelper">Shows pending orders older than 2 minutes. Select one to re-send to your team so it appears to drivers.</div>
+                        <div id="fixing-list" style="max-height:56vh;overflow:auto;padding:6px 18px 18px 18px;">
+                            <div style="padding:16px;text-align:center;color:#9ca3af;">
+                                <i class="fas fa-spinner fa-spin"></i> Loading...
+                            </div>
+                        </div>
+                        <div style="padding:12px 18px;border-top:1px solid #f3f4f6;display:flex;gap:8px;justify-content:flex-end;">
+                            <button class="close-fixing" style="padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;" data-translate="cancel">Cancel</button>
+                            <button id="fix-selected-order" disabled style="padding:10px 14px;border-radius:10px;background:#06b6d4;color:#fff;border:none;opacity:.6;" data-translate="fixSelectedOrder">Fix Selected</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+                const closeEls = modal.querySelectorAll('.close-fixing');
+                closeEls.forEach(el=> el.addEventListener('click', ()=> modal.remove()));
+                modal.addEventListener('click', (e)=> { if(e.target===modal) modal.remove(); });
+
+                const listEl = modal.querySelector('#fixing-list');
+                const fixBtn = modal.querySelector('#fix-selected-order');
+                let selectedId = null;
+
+                const renderList = (orders)=>{
+                    if (!orders || orders.length===0) {
+                        listEl.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;">No pending orders older than 2 minutes.</div>`;
+                        return;
+                    }
+                    listEl.innerHTML = orders.map(o=>{
+                        const created = new Date(o.created_at);
+                        const mins = Math.max(0, Math.floor((Date.now()-created.getTime())/60000));
+                        const prep = parseInt(o.preparation_time)||0;
+                        const remaining = Math.max(0, prep - mins);
+                        return `
+                        <label style="display:flex;gap:12px;align-items:flex-start;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin:8px 0;cursor:pointer;">
+                            <input type="radio" name="fix-order" value="${o.id}" style="margin-top:4px;" />
+                            <div style="flex:1;">
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <div style="font-weight:600;color:#111827;">#${o.id}</div>
+                                    <div style="font-size:12px;color:#6b7280;">${created.toLocaleString()}</div>
+                                </div>
+                                <div style="font-size:13px;color:#374151;margin-top:6px;">${o.delivery_address || ''}</div>
+                                <div style="font-size:12px;color:#6b7280;margin-top:4px;">⏰ ${remaining===0?'Ready Now':`Ready in ${remaining} minutes`} • €${parseFloat(o.order_amount||0).toFixed(2)}</div>
+                            </div>
+                        </label>`;
+                    }).join('');
+
+                    // bind selection
+                    listEl.querySelectorAll('input[name="fix-order"]').forEach(input=>{
+                        input.addEventListener('change', ()=>{
+                            selectedId = input.value;
+                            fixBtn.disabled = !selectedId;
+                            fixBtn.style.opacity = selectedId ? '1' : '.6';
+                        });
+                    });
+                };
+
+                // Load list
+                this.fetchStalePendingOrders().then(renderList).catch(err=>{
+                    console.error('Fix list load failed', err);
+                    listEl.innerHTML = `<div style="padding:16px;text-align:center;color:#ef4444;">Failed to load. Try again later.</div>`;
+                });
+
+                // Handle fix
+                fixBtn.addEventListener('click', async ()=>{
+                    if (!selectedId || !this.currentShop || !this.currentShop.id) return;
+                    try {
+                        fixBtn.disabled = true; fixBtn.style.opacity = '.6';
+                        this.showToast('Fixing order...', 'info');
+                        const resp = await fetch(`/api/shop/${this.currentShop.id}/orders/${selectedId}/fix`, { method: 'POST' });
+                        const result = await resp.json();
+                        if (result.success) {
+                            this.showToast(`Order #${selectedId} re-sent to drivers`, 'success');
+                            modal.remove();
+                        } else {
+                            throw new Error(result.message || 'Fix failed');
+                        }
+                    } catch (e) {
+                        console.error('Fix order failed', e);
+                        this.showToast('Failed to fix order', 'error');
+                        fixBtn.disabled = false; fixBtn.style.opacity = '1';
+                    }
+                });
+            } catch (e) {
+                console.error('Open fixing modal failed', e);
+                this.showToast('Failed to open fixing tools', 'error');
+            }
+        }
+
+        async fetchStalePendingOrders(minMinutes = 2) {
+            if (!this.currentShop || !this.currentShop.id) throw new Error('No shop');
+            const resp = await fetch(`/api/shop/${this.currentShop.id}/pending-orders-stale?minMinutes=${minMinutes}`);
+            const json = await resp.json();
+            if (!json.success) throw new Error(json.message || 'Load failed');
+            return Array.isArray(json.orders) ? json.orders : [];
+        }
+
+
     async loadDrivers() {
         try {
             // Show loading state immediately
@@ -2492,7 +2602,23 @@ class ShopApp {
                             <i class="fas fa-chevron-right" style="color: #d1d5db; font-size: 14px;"></i>
                         </div>
 
-
+                        <!-- Fixing Tools -->
+                        <div onclick="shopApp.openFixingModal()" style="
+                            display: flex;
+                            align-items: center;
+                            padding: 16px 20px;
+                            cursor: pointer;
+                            transition: background-color 0.2s; border-top: 1px solid #f3f4f6;"
+                            onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='transparent'">
+                            <div style="width: 40px; height: 40px; background: #ecfeff; border-radius: 10px; display:flex; align-items:center; justify-content:center; margin-right:16px;">
+                                <i class="fas fa-tools" style="color:#06b6d4; font-size:18px;"></i>
+                            </div>
+                            <div style="flex:1;">
+                                <div style="font-size:16px; font-weight:500; color:#111827; margin-bottom:2px;" data-translate="fixing">Fixing</div>
+                                <div style="font-size:13px; color:#6b7280;" data-translate="fixingDesc">Find and fix pending orders not shown to drivers</div>
+                            </div>
+                            <i class="fas fa-chevron-right" style="color:#d1d5db; font-size:14px;"></i>
+                        </div>
 
                     <!-- Settings -->
                     <div onclick="shopApp.showPasswordModal()" style="

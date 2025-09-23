@@ -513,6 +513,10 @@ class DeliveryApp {
         // Setup notifications menu
         this.setupNotificationsMenu();
 
+
+        // Start background supervisor that ensures older pending orders are visible
+        this.startGlobalLiveOrdersSupervisor();
+
         console.log('Main app initialization complete');
     }
 
@@ -784,7 +788,12 @@ class DeliveryApp {
         // Update current page
         this.currentPage = page;
 
-        // Floating button removed - no longer needed
+        // Manage live-orders watchdog depending on page
+        if (page === 'orders') {
+            this.startLiveOrdersWatchdog();
+        } else {
+            this.stopLiveOrdersWatchdog();
+        }
 
         // Handle specific page actions
         switch (page) {
@@ -6202,7 +6211,8 @@ class DeliveryApp {
             }
         }
 
-        const liveOrdersCount = deduped.filter(n => n.status === 'pending').length;
+        // Consider missing/"new" status as pending for robustness
+        const liveOrdersCount = deduped.filter(n => (n.status === 'pending' || n.status === 'new' || !n.status)).length;
 
         // Create modern mobile UI
         pageContainer.innerHTML = `
@@ -6984,7 +6994,7 @@ class DeliveryApp {
                     </div>
 
                     <!-- Compact Action Buttons -->
-                    ${(notification.status === 'pending') && (notification.order_id || (/Order #\d+/i.test((notification.message || '')))) ? `
+                    ${((!notification.status || notification.status === 'pending' || notification.status === 'new') && (notification.order_id || (/Order #\d+/i.test((notification.message || ''))))) ? `
                         <div style="display: flex; gap: 8px; margin-top: 14px;">
                             <button
                                 type="button"
@@ -10032,6 +10042,104 @@ class DeliveryApp {
 
         console.log('Enhanced back navigation prevention activated (no browser exit dialogs)');
     }
+
+        // Lightweight watchdog: periodically reconcile live (pending) orders for up to 2 minutes
+        startLiveOrdersWatchdog() {
+            try {
+                // Avoid duplicates
+                if (this._liveWatchdogTimer) return;
+                this._liveWatchdogRuns = 0;
+                this._liveWatchdogTimer = setInterval(async () => {
+                    this._liveWatchdogRuns++;
+                    // Stop after ~2 minutes or when leaving Orders page
+                    if (this.currentPage !== 'orders' || this._liveWatchdogRuns > 4) {
+                        this.stopLiveOrdersWatchdog();
+                        return;
+                    }
+                    try {
+                        const latest = await this.getFromMemory('notifications', true);
+                        if (Array.isArray(latest)) {
+                            this.notifications = latest;
+                            // If currently viewing Orders, refresh UI quickly
+                            if (this.currentPage === 'orders') {
+                                // Refresh Orders page; the banner/count derives from notifications
+                                this.renderOrders();
+                                if (typeof this.updateNotificationsMenuCounts === 'function') {
+                                    setTimeout(() => this.updateNotificationsMenuCounts(), 50);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Live orders watchdog sync failed:', e);
+                    }
+                }, 30000); // run every 30s (4 times => ~2 minutes)
+            } catch (_) {}
+        }
+
+        stopLiveOrdersWatchdog() {
+            try {
+                if (this._liveWatchdogTimer) {
+                    clearInterval(this._liveWatchdogTimer);
+                    this._liveWatchdogTimer = null;
+                    this._liveWatchdogRuns = 0;
+                }
+            } catch (_) {}
+        }
+
+
+        // Global supervisor: runs in background every 60s (when tab visible)
+        startGlobalLiveOrdersSupervisor() {
+            try {
+                if (this._globalLiveSupervisor) return;
+                this._globalLiveSupervisor = setInterval(() => {
+                    if (document.hidden) return; // Skip when not visible to save resources
+                    this.checkPendingOrdersHealth();
+                }, 60000); // 1 minute cadence
+            } catch (_) {}
+        }
+
+        stopGlobalLiveOrdersSupervisor() {
+            if (this._globalLiveSupervisor) {
+                clearInterval(this._globalLiveSupervisor);
+                this._globalLiveSupervisor = null;
+            }
+        }
+
+        async checkPendingOrdersHealth() {
+            try {
+                if (!this.userId || !this.sessionToken) return;
+                const latest = await this.getFromMemory('notifications', true);
+                if (!Array.isArray(latest)) return;
+
+                // Compute keys for pending (>2 min) orders
+                const now = Date.now();
+                const keys = latest
+                    .filter(n => (n.status === 'pending' || n.status === 'new' || !n.status))
+                    .filter(n => {
+                        const ts = new Date(n.created_at).getTime();
+                        return Number.isFinite(ts) && (now - ts) > 120000; // older than 2 minutes
+                    })
+                    .map(n => n.order_id || n.id)
+                    .filter(Boolean)
+                    .sort()
+                    .join(',');
+
+                if (keys && keys !== this._lastPendingHealthKeys) {
+                    this._lastPendingHealthKeys = keys;
+                    this.notifications = latest;
+                    // Refresh Orders UI if user is there; otherwise keep memory fresh for when they open it
+                    if (this.currentPage === 'orders') {
+                        this.renderOrders();
+                    }
+                    if (typeof this.updateNotificationsMenuCounts === 'function') {
+                        this.updateNotificationsMenuCounts();
+                    }
+                }
+            } catch (e) {
+                console.warn('Pending orders health check failed:', e.message || e);
+            }
+        }
+
 
     // Enhanced push notification system with better permission handling
     async setupPushNotifications() {
