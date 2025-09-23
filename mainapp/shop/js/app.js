@@ -1353,10 +1353,29 @@ class ShopApp {
 
         async fetchStalePendingOrders(minMinutes = 2) {
             if (!this.currentShop || !this.currentShop.id) throw new Error('No shop');
-            const resp = await fetch(`/api/shop/${this.currentShop.id}/pending-orders-stale?minMinutes=${minMinutes}`);
-            const json = await resp.json();
-            if (!json.success) throw new Error(json.message || 'Load failed');
-            return Array.isArray(json.orders) ? json.orders : [];
+            const primaryUrl = `/api/shop/${this.currentShop.id}/pending-orders-stale?minMinutes=${minMinutes}`;
+            try {
+                const resp = await fetch(primaryUrl);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const ct = resp.headers.get('content-type') || '';
+                if (!ct.includes('application/json')) throw new Error('Non-JSON response');
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.message || 'Load failed');
+                return Array.isArray(json.orders) ? json.orders : [];
+            } catch (err) {
+                console.warn('Primary stale-pending endpoint failed, using fallback:', err?.message || err);
+                // Fallback: fetch pending orders and filter on client by age
+                const fbResp = await fetch(`/api/shop/${this.currentShop.id}/orders?status=pending&limit=200`);
+                if (!fbResp.ok) throw new Error(`Fallback HTTP ${fbResp.status}`);
+                const fbJson = await fbResp.json();
+                if (!fbJson.success) throw new Error(fbJson.message || 'Fallback failed');
+                const cutoff = Date.now() - (minMinutes * 60 * 1000);
+                const pendingOld = (fbJson.orders || []).filter(o => {
+                    const ts = new Date(o.created_at).getTime();
+                    return Number.isFinite(ts) && ts <= cutoff && (o.status === 'pending' || !o.status);
+                });
+                return pendingOld;
+            }
         }
 
 

@@ -2543,6 +2543,143 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
     }
 });
 
+
+// GET /api/shop/:shopId/pending-orders-stale - pending orders older than N minutes (default 2)
+app.get('/api/shop/:shopId/pending-orders-stale', async (req, res) => {
+    try {
+        const { shopId } = req.params;
+        const minMinutes = Math.max(1, parseInt(req.query.minMinutes || '2'));
+        const cutoff = new Date(Date.now() - minMinutes * 60 * 1000).toISOString();
+
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, created_at, order_amount, customer_phone, customer_name, delivery_address, notes, payment_method, preparation_time, status')
+            .eq('shop_account_id', parseInt(shopId))
+            .eq('status', 'pending')
+            .lt('created_at', cutoff)
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+
+        res.json({ success: true, orders: data || [] });
+    } catch (e) {
+        console.error('Error fetching stale pending orders:', e);
+        res.status(500).json({ success: false, message: 'Failed to load pending orders' });
+    }
+});
+
+// POST /api/shop/:shopId/orders/:orderId/fix - re-broadcast pending order to team (no duplicates)
+app.post('/api/shop/:shopId/orders/:orderId/fix', async (req, res) => {
+    try {
+        const { shopId, orderId } = req.params;
+        // Load order and validate still pending
+        const { data: order, error: ordErr } = await supabase
+            .from('shop_orders')
+            .select('*')
+            .eq('id', parseInt(orderId))
+            .eq('shop_account_id', parseInt(shopId))
+            .eq('status', 'pending')
+            .maybeSingle();
+        if (ordErr) throw ordErr;
+        if (!order) return res.status(404).json({ success: false, message: 'Order not pending or not found' });
+
+        // Get team members
+        const { data: teamMembers, error: teamErr } = await supabase
+            .from('shop_team_members')
+            .select('driver_id')
+            .eq('shop_id', parseInt(shopId));
+        if (teamErr) throw teamErr;
+        const members = Array.isArray(teamMembers) ? teamMembers : [];
+        if (members.length === 0) return res.json({ success: true, fixed: 0, message: 'No team members to notify' });
+
+        const driverIds = members.map(m => m.driver_id);
+        // Skip drivers who already have a pending notification for this order
+        const { data: existingRows } = await supabase
+            .from('driver_notifications')
+            .select('driver_id')
+            .eq('order_id', parseInt(orderId))
+            .in('driver_id', driverIds)
+            .eq('status', 'pending');
+        const existingSet = new Set((existingRows || []).map(r => r.driver_id));
+
+        // Compute remaining preparation time
+        let remaining = 0;
+        try {
+            const prep = parseInt(order.preparation_time) || 0;
+            const minutesSince = Math.max(0, Math.floor((Date.now() - new Date(order.created_at).getTime()) / 60000));
+            remaining = Math.max(0, prep - minutesSince);
+        } catch (_) {}
+
+        // Load shop data for names
+        const { data: shopData } = await supabase
+            .from('shop_accounts')
+            .select('id, shop_name, email')
+            .eq('id', parseInt(shopId))
+            .maybeSingle();
+
+        const isPaid = (order.payment_method || '').toLowerCase() === 'card';
+        const prepText = remaining === 0 ? 'Ready Now' : `Ready in ${remaining} minutes`;
+        const amountOrPaid = isPaid ? '💳 Payment: Card (Paid)' : `💰 Amount: €${parseFloat(order.order_amount || 0).toFixed(2)}`;
+        const orderMessage = `🚚 New Order Available!\n📦 Order #${order.id}\n${amountOrPaid}\n📍 ${order.delivery_address || ''}\n📞 ${order.customer_phone || ''}\n⏰ ${prepText}\n${order.customer_name ? `👤 ${order.customer_name}` : ''}\n${order.notes ? `📝 ${order.notes}` : ''}\n\nTap to accept this delivery order.`;
+
+        const notifications = members
+            .filter(m => !existingSet.has(m.driver_id))
+            .map(m => ({
+                driver_id: m.driver_id,
+                shop_id: parseInt(shopId),
+                message: orderMessage,
+                status: 'pending',
+                is_read: false,
+                // Preserve original order creation time so drivers see the real sending time
+                created_at: order.created_at,
+                order_id: parseInt(orderId)
+            }));
+
+        let inserted = [];
+        if (notifications.length > 0) {
+            const { data: insData, error: insErr } = await supabase
+                .from('driver_notifications')
+                .insert(notifications)
+                .select('id, created_at, status, is_read, driver_id');
+            if (insErr) throw insErr;
+            inserted = insData || [];
+        }
+
+        // Broadcast and send push for inserted notifications only
+        const pushPromises = [];
+        for (const n of inserted) {
+            try {
+                const realtimeNotification = {
+                    id: n.id,
+                    message: orderMessage,
+                    status: n.status || 'pending',
+                    is_read: n.is_read || false,
+                    created_at: n.created_at,
+                    confirmed_at: null,
+                    order_id: parseInt(orderId),
+                    shop: { id: parseInt(shopId), name: shopData?.shop_name },
+                    shop_name: shopData?.shop_name
+                };
+                broadcastToUser(n.driver_id, 'driver', realtimeNotification);
+                pushPromises.push(
+                    sendPushNotification(n.driver_id, 'driver', {
+                        id: n.id,
+                        title: `New Order from ${shopData?.shop_name || 'Shop'}`,
+                        message: `€${order.order_amount} delivery to ${order.delivery_address}`,
+                        shop_name: shopData?.shop_name,
+                        order_id: parseInt(orderId)
+                    })
+                );
+            } catch (e) { console.warn('Fix push/broadcast failed for', n.id, e); }
+        }
+        await Promise.allSettled(pushPromises);
+
+        return res.json({ success: true, fixed: inserted.length, remaining_pendings: (existingRows || []).length });
+    } catch (e) {
+        console.error('Error fixing order:', e);
+        res.status(500).json({ success: false, message: 'Failed to fix order' });
+    }
+});
+
 // GET /api/shop/:shopId/orders - Get orders for a shop (for history page)
 app.get('/api/shop/:shopId/orders', authenticateUser, async (req, res) => {
     try {
