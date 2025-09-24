@@ -6026,21 +6026,64 @@ app.post('/api/orders/accept', authenticateUser, async (req, res) => {
 
         console.log(`📦 Driver ${driverId} accepting order ${orderId} via ${acceptedVia}`);
 
-        // 1) Atomically assign if still pending
-        const { data: orderData, error: orderError } = await supabase
-            .from('shop_orders')
-            .update({ driver_id: driverId, status: 'assigned', updated_at: new Date().toISOString() })
-            .eq('id', orderId)
-            .eq('status', 'pending')
-            .select('*')
-            .maybeSingle();
-
-        if (orderError) {
-            console.error('Error accepting order:', orderError);
-            return res.status(500).json({ success: false, message: 'Failed to accept order' });
+        // 1) Atomically assign if still pending, with transient-safe retries and idempotency
+        let orderData = null; let lastErr = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const { data, error } = await supabase
+                    .from('shop_orders')
+                    .update({ driver_id: driverId, status: 'assigned', updated_at: new Date().toISOString() })
+                    .eq('id', orderId)
+                    .eq('status', 'pending')
+                    .select('*')
+                    .maybeSingle();
+                if (!error) { orderData = data; break; }
+                lastErr = error;
+                const msg = (error && (error.message || String(error))) || '';
+                if (!/fetch failed/i.test(msg)) break; // not a transient fetch error
+            } catch (e) {
+                lastErr = e;
+                const msg = (e && (e.message || String(e))) || '';
+                if (!/fetch failed/i.test(msg)) break;
+            }
+            await new Promise(r => setTimeout(r, attempt === 0 ? 150 : 350));
         }
+
+        if (lastErr && !orderData) {
+            console.error('Accept order transient failure after retries:', lastErr);
+            // Hedged check: if already assigned to this driver, treat as success
+            try {
+                const { data: current } = await supabase
+                    .from('shop_orders')
+                    .select('*')
+                    .eq('id', orderId)
+                    .maybeSingle();
+                if (current && current.driver_id === driverId && current.status !== 'pending') {
+                    orderData = current;
+                }
+            } catch (_) {}
+            if (!orderData) {
+                return res.status(503).json({ success: false, message: 'Temporary network issue while accepting order. Please retry.' });
+            }
+        }
+
         if (!orderData) {
-            return res.status(409).json({ success: false, code: 'ORDER_ALREADY_ACCEPTED', message: 'Order already accepted by another driver' });
+            // No row updated; check whether already accepted by this driver
+            try {
+                const { data: current } = await supabase
+                    .from('shop_orders')
+                    .select('*')
+                    .eq('id', orderId)
+                    .maybeSingle();
+                if (current && current.driver_id === driverId && current.status !== 'pending') {
+                    orderData = current; // idempotent success
+                } else {
+                    return res.status(409).json({ success: false, code: 'ORDER_ALREADY_ACCEPTED', message: 'Order already accepted by another driver' });
+                }
+            } catch (e) {
+                console.error('Post-check after accept update failed:', e);
+                return res.status(500).json({ success: false, message: 'Failed to accept order' });
+            }
         }
 
         // 2) Instantly remove from other drivers (websocket broadcast)
