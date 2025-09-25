@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Padoo Delivery - Sign In</title>
-    
+
     <!-- Prevent caching and back button navigation -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    
+
     <!-- PWA Meta Tags -->
     <meta name="description" content="Complete delivery management system for drivers and shops">
     <meta name="theme-color" content="#FF6B35">
@@ -18,7 +18,7 @@
     <meta name="apple-mobile-web-app-title" content="Padoo Delivery">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="application-name" content="Padoo Delivery">
-    
+
     <!-- Mobile App Switcher -->
     <meta name="format-detection" content="telephone=no">
     <meta name="msapplication-TileColor" content="#FF6B35">
@@ -26,7 +26,7 @@
     <meta name="msapplication-tap-highlight" content="no">
     <meta name="apple-touch-fullscreen" content="yes">
     <meta name="apple-mobile-web-app-oriented" content="portrait">
-    
+
     <!-- Prevent browser branding in app switcher -->
     <meta name="mobile-web-app-title" content="Padoo Delivery">
     <meta name="apple-mobile-web-app-title" content="Padoo Delivery">
@@ -34,31 +34,67 @@
     <meta name="msapplication-starturl" content="/">
     <meta name="msapplication-navbutton-color" content="#FF6B35">
     <meta name="msapplication-window" content="width=1024;height=768">
-    
+
     <!-- Android Chrome -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FF6B35">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#E55A2B">
-    
+
     <!-- Force standalone mode -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="msapplication-navbutton-color" content="#FF6B35">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-status-bar-style" content="black-translucent">
-    
+
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
-    
+
     <!-- Icons -->
     <link rel="icon" href="/icons/icon-192x192.png">
     <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
-    
+
     <!-- Preload critical resources -->
     <link rel="preload" href="/pwa-utils.js" as="script">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
+
     <!-- Styles -->
+    <script>
+        // Early auto-redirect before UI paints if a valid session exists
+        (function () {
+            try {
+                const now = Date.now();
+                const sevenDays = 7 * 24 * 60 * 60 * 1000;
+                const tryRedirect = (session, typeKey) => {
+                    if (!session) return false;
+                    // If session carries an expiry, honor it; otherwise treat as valid
+                    const exp = session.expiresAt ? new Date(session.expiresAt).getTime() : null;
+                    if (exp && now > exp) return false; // expired
+                    const userType = session.userType || (typeKey === 'shopSession' ? 'shop' : 'driver');
+                    const dest = userType === 'shop' ? '/shop' : '/app';
+                    // Sliding window: extend expiry on use
+                    try {
+                        session.expiresAt = new Date(now + sevenDays).toISOString();
+                        localStorage.setItem(typeKey === 'shopSession' ? 'shopSession' : 'userSession', JSON.stringify(session));
+                    } catch (_) {}
+                    window.location.replace(dest);
+                    return true;
+                };
+
+                const userSessionStr = localStorage.getItem('userSession');
+                if (userSessionStr) {
+                    const s = JSON.parse(userSessionStr);
+                    if (tryRedirect(s, 'userSession')) return;
+                }
+                const shopSessionStr = localStorage.getItem('shopSession');
+                if (shopSessionStr) {
+                    const s = JSON.parse(shopSessionStr);
+                    if (tryRedirect(s, 'shopSession')) return;
+                }
+            } catch (e) { /* ignore and show login UI */ }
+        })();
+    </script>
+
     <link rel="stylesheet" href="css/login.css">
 </head>
 <body>
@@ -180,7 +216,7 @@
                     togglePassword.addEventListener('click', () => {
                         const passwordInput = document.getElementById('password');
                         const icon = togglePassword.querySelector('i');
-                        
+
                         if (passwordInput.type === 'password') {
                             passwordInput.type = 'text';
                             icon.classList.remove('fa-eye');
@@ -190,7 +226,7 @@
                             icon.classList.remove('fa-eye-slash');
                             icon.classList.add('fa-eye');
                         }
-                        
+
                         // Focus back on password input
                         passwordInput.focus();
                     });
@@ -201,7 +237,7 @@
                     input.addEventListener('focus', () => {
                         input.parentElement.classList.add('input-focused');
                     });
-                    
+
                     input.addEventListener('blur', () => {
                         input.parentElement.classList.remove('input-focused');
                     });
@@ -210,7 +246,7 @@
 
             selectRole(role) {
                 this.selectedRole = role;
-                
+
                 // Update UI with smooth animation
                 document.querySelectorAll('.role-option').forEach(option => {
                     option.classList.remove('active');
@@ -250,32 +286,36 @@
 
                     if (result.success) {
                         this.showSuccess();
-                        
+
                         // Store user data based on role
+                        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+                        const expiresAt = new Date(Date.now() + sevenDaysMs).toISOString();
                         if (this.selectedRole === 'driver') {
                             localStorage.setItem('userSession', JSON.stringify({
                                 user: result.user,
                                 userType: result.userType,
                                 sessionToken: result.sessionToken,
-                                loginTime: new Date().toISOString()
+                                loginTime: new Date().toISOString(),
+                                expiresAt
                             }));
                         } else {
                             localStorage.setItem('shopSession', JSON.stringify({
                                 shop: result.user,
                                 userType: result.userType,
                                 sessionToken: result.sessionToken,
-                                loginTime: new Date().toISOString()
+                                loginTime: new Date().toISOString(),
+                                expiresAt
                             }));
                         }
 
                         console.log('Redirecting to:', result.redirectUrl);
-                        
+
                         // Redirect with animation
                         document.querySelector('.login-container').classList.add('slide-out');
                         setTimeout(() => {
                             window.location.href = result.redirectUrl;
                         }, 600);
-                        
+
                     } else {
                         this.showError(result.message || 'Login failed');
                     }
@@ -293,7 +333,7 @@
                 const btnEl = document.getElementById('login-btn');
                 const btnText = btnEl.querySelector('.btn-text');
                 const btnIcon = btnEl.querySelector('i');
-                
+
                 btnText.textContent = 'Success!';
                 btnIcon.className = 'fas fa-check';
                 btnEl.classList.add('success');
@@ -303,7 +343,7 @@
                 const errorEl = document.getElementById('error-message');
                 errorEl.textContent = message;
                 errorEl.style.display = 'block';
-                
+
                 // Shake animation
                 const container = document.querySelector('.login-container');
                 container.classList.add('shake');
@@ -322,7 +362,7 @@
                 const btnEl = document.getElementById('login-btn');
                 const btnText = btnEl.querySelector('.btn-text');
                 const btnIcon = btnEl.querySelector('i');
-                
+
                 if (show) {
                     loadingEl.style.display = 'block';
                     btnEl.disabled = true;
@@ -344,8 +384,8 @@
             new LoginApp();
         });
     </script>
-    
+
     <!-- PWA Scripts -->
     <script src="/pwa-utils.js"></script>
 </body>
-</html> 
+</html>

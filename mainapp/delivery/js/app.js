@@ -523,52 +523,86 @@ class DeliveryApp {
 
 
     checkAuthStatus() {
-        // Get user session data from localStorage
+        const tokenPattern = /^session_([^_]+)_(driver|shop)_(\d{10,})$/;
+        // Get user session data from localStorage (new format preferred)
         const sessionData = localStorage.getItem('userSession');
 
         if (sessionData) {
             try {
-                // Parse the session data
                 const session = JSON.parse(sessionData);
 
-                // Check if we have all required session data
-                if (session && session.user && session.sessionToken) {
-                    this.currentUser = session.user;
-                    this.sessionToken = session.sessionToken;
-
-                    // Store in app-specific keys for backward compatibility
-                    localStorage.setItem('deliveryAppUser', JSON.stringify(this.currentUser));
-                    localStorage.setItem('deliveryAppSession', this.sessionToken);
-
-                    console.log('Found valid session for:', this.currentUser.email);
-                    return true;
+                // Parse and validate stateless token strictly for DRIVER app
+                const m = tokenPattern.exec(session.sessionToken || '');
+                if (!m) {
+                    console.warn('Invalid token format in userSession');
+                    this.clearSessionData();
+                    return false;
                 }
+                const tokenUserId = m[1];
+                const tokenType = m[2];
+                const issuedAt = parseInt(m[3], 10);
+
+                if (tokenType !== 'driver') {
+                    console.warn('Token userType is not driver; clearing');
+                    this.clearSessionData();
+                    return false;
+                }
+                if (!session.user || String(session.user.id) !== String(tokenUserId)) {
+                    console.warn('Token userId does not match session user; clearing');
+                    this.clearSessionData();
+                    return false;
+                }
+
+                // Expiry check: prefer expiresAt; otherwise use token issuance time (7 days)
+                const now = Date.now();
+                const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+                const exp = session.expiresAt ? new Date(session.expiresAt).getTime() : (issuedAt + sevenDaysMs);
+                if (now > exp) {
+                    console.warn('Session expired; clearing');
+                    this.clearSessionData();
+                    return false;
+                }
+
+                // Extend sliding window and set fields
+                try {
+                    session.expiresAt = new Date(now + sevenDaysMs).toISOString();
+                    localStorage.setItem('userSession', JSON.stringify(session));
+                } catch (_) {}
+
+                this.currentUser = session.user;
+                this.sessionToken = session.sessionToken;
+                // Backward compatibility keys
+                localStorage.setItem('deliveryAppUser', JSON.stringify(this.currentUser));
+                localStorage.setItem('deliveryAppSession', this.sessionToken);
+
+                console.log('Found valid DRIVER session for:', this.currentUser.email);
+                return true;
             } catch (error) {
                 console.error('Error parsing stored user data:', error);
-                localStorage.removeItem('userSession');
-                localStorage.removeItem('deliveryAppUser');
-                localStorage.removeItem('deliveryAppSession');
-            }
-        } else {
-            // Check for legacy storage keys as fallback
-            const storedUser = localStorage.getItem('deliveryAppUser');
-            const storedSession = localStorage.getItem('deliveryAppSession');
-
-            if (storedUser && storedSession) {
-                try {
-                    this.currentUser = JSON.parse(storedUser);
-                    this.sessionToken = storedSession;
-                    console.log('Found valid legacy session for:', this.currentUser.name || this.currentUser.email);
-                    return true;
-                } catch (error) {
-                    console.error('Error parsing legacy user data:', error);
-                    localStorage.removeItem('deliveryAppUser');
-                    localStorage.removeItem('deliveryAppSession');
-                }
+                this.clearSessionData();
             }
         }
 
-        console.warn('No valid session found, user needs to log in');
+        // Check for legacy storage keys as fallback (must also match DRIVER token)
+        const storedUser = localStorage.getItem('deliveryAppUser');
+        const storedSession = localStorage.getItem('deliveryAppSession');
+        if (storedUser && storedSession) {
+            try {
+                const m = tokenPattern.exec(storedSession);
+                if (!m || m[2] !== 'driver') throw new Error('Legacy token invalid or wrong type');
+                this.currentUser = JSON.parse(storedUser);
+                if (String(this.currentUser.id) !== String(m[1])) throw new Error('Legacy token user mismatch');
+                this.sessionToken = storedSession;
+                console.log('Found valid legacy DRIVER session for:', this.currentUser.name || this.currentUser.email);
+                return true;
+            } catch (error) {
+                console.error('Legacy session invalid:', error);
+                localStorage.removeItem('deliveryAppUser');
+                localStorage.removeItem('deliveryAppSession');
+            }
+        }
+
+        console.warn('No valid session found, redirecting to login');
         return false;
     }
 
@@ -1823,6 +1857,9 @@ class DeliveryApp {
 
     async logout() {
         try {
+            // Mark that we're exiting intentionally via the Logout button
+            this._exitingViaLogout = true;
+
             // Call server logout endpoint if we have a session token
             if (this.sessionToken) {
                 await fetch('/api/auth/logout', {
@@ -10001,14 +10038,8 @@ class DeliveryApp {
             backPressCount++;
             lastBackPress = now;
 
-            // Show appropriate message based on press count
-            if (backPressCount === 1) {
-            this.showToast('Please use the logout button to exit the app', 'warning');
-            } else if (backPressCount === 2) {
-                this.showToast('Back button disabled for app security. Use logout to exit.', 'warning');
-            } else {
-                this.showToast('❌ Cannot exit app via back button. Please use logout.', 'error');
-            }
+            // Always block and show the same message every time
+            this.showToast('You can only log out only using your log out button', 'warning');
 
             // Vibrate for mobile feedback
             if ('vibrate' in navigator) {
@@ -10032,11 +10063,10 @@ class DeliveryApp {
             });
         }
 
-        // Prevent page unload for mobile PWAs
+        // Prevent accidental page unload for mobile PWAs, but allow explicit logout
         window.addEventListener('pagehide', (event) => {
-            // Only prevent if it's not a normal navigation
-            if (!event.persisted) {
-                event.preventDefault();
+            if (!event.persisted && !this._exitingViaLogout) {
+                try { event.preventDefault(); } catch(_) {}
             }
         });
 

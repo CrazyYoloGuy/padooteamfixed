@@ -107,9 +107,9 @@ setInterval(() => {
     const expiredSessions = [];
 
     for (const [userId, session] of activeSessions.entries()) {
-        // Session expires after 24 hours of inactivity
+        // Session expires after 7 days of inactivity (persistent login)
         const timeDiff = now - session.lastActivity;
-        if (timeDiff > 24 * 60 * 60 * 1000) {
+        if (timeDiff > 7 * 24 * 60 * 60 * 1000) {
             expiredSessions.push(userId);
         }
     }
@@ -138,6 +138,25 @@ wss.on('connection', (ws, req) => {
                 let session = getUserSession(userId);
                 if (!session && providedToken) {
                     session = validateSession(providedToken);
+                }
+                if (!session && providedToken) {
+                    // Stateless fallback: parse token
+                    const m = /^session_([^_]+)_(driver|shop)_(\d{10,})$/.exec(providedToken);
+                    if (m) {
+                        const parsedUserId = m[1];
+                        const parsedUserType = m[2];
+                        const issuedAt = parseInt(m[3], 10);
+                        const now = Date.now();
+                        const maxAgeMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+                        const skewMs = 60 * 1000;
+                        const idLooksValid = isUuidLike(parsedUserId) || /^\d+$/.test(parsedUserId);
+                        const ageOk = (now + skewMs) >= issuedAt && (now - issuedAt) <= maxAgeMs;
+                        const userMatches = String(userId) === String(parsedUserId);
+                        if (idLooksValid && ageOk && userMatches) {
+                            session = { userId: parsedUserId, userType: parsedUserType, sessionToken: providedToken, lastActivity: new Date() };
+                            console.log(`✅ WebSocket stateless token accepted for ${parsedUserType} ${parsedUserId}`);
+                        }
+                    }
                 }
                 if (!session) {
                     console.log(`❌ WebSocket authentication rejected: No active session for ${userType} ${userId}`);
@@ -439,13 +458,38 @@ function authenticateUser(req, res, next) {
                 req.userType = session.userType;
                 console.log(`✅ Session validated for ${session.userType} ${userId}`);
             } else {
-                console.log('❌ Invalid or expired session token');
-                // Provide a hint to clients to re-auth via WebSocket using sessionToken
-                return res.status(401).json({
-                    success: false,
-                    code: 'SESSION_EXPIRED',
-                    message: 'Session expired. Please log in again.'
-                });
+                // Fallback: stateless token parse (no DB/memory lookup)
+                // Format: session_<userId>_<userType>_<timestamp>
+                const m = /^session_([^_]+)_(driver|shop)_(\d{10,})$/.exec(sessionToken);
+                if (m) {
+                    const parsedUserId = m[1];
+                    const parsedUserType = m[2];
+                    const issuedAt = parseInt(m[3], 10);
+                    const now = Date.now();
+                    const maxAgeMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+                    const skewMs = 60 * 1000; // clock skew safety
+                    const idLooksValid = isUuidLike(parsedUserId) || /^\d+$/.test(parsedUserId);
+                    const ageOk = (now + skewMs) >= issuedAt && (now - issuedAt) <= maxAgeMs;
+                    if (idLooksValid && ageOk) {
+                        userId = parsedUserId;
+                        req.userType = parsedUserType;
+                        console.log(`✅ Stateless token accepted for ${parsedUserType} ${parsedUserId}`);
+                    } else {
+                        console.log('❌ Invalid or expired session token');
+                        return res.status(401).json({
+                            success: false,
+                            code: 'SESSION_EXPIRED',
+                            message: 'Session expired. Please log in again.'
+                        });
+                    }
+                } else {
+                    console.log('❌ Invalid or expired session token');
+                    return res.status(401).json({
+                        success: false,
+                        code: 'SESSION_EXPIRED',
+                        message: 'Session expired. Please log in again.'
+                    });
+                }
             }
         }
 
@@ -1087,7 +1131,8 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         // Create new session
-        const sessionToken = `session_${user.id}_${Date.now()}`;
+        // Stateless-friendly token embedding userId and userType for client-side persistence
+        const sessionToken = `session_${user.id}_${loginType}_${Date.now()}`;
         const sessionData = createSession(user.id, loginType, sessionToken);
 
         // Store user agent and IP for session tracking

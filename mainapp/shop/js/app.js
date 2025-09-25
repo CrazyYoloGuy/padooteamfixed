@@ -44,12 +44,8 @@ class ShopApp {
             return;
         }
 
-        // Prevent back button from navigating away; show notice instead
-        window.history.replaceState(null, null, window.location.href);
-        window.addEventListener('popstate', () => {
-            window.history.pushState(null, null, window.location.href);
-            try { this.showToast('You cannot use the device back button here', 'info'); } catch (e) {}
-        });
+        // Prevent back navigation; require explicit Logout button
+        this.preventBackNavigation();
 
         // Initialize app components
         this.bindEvents();
@@ -356,40 +352,88 @@ class ShopApp {
     }
 
     checkAuthStatus() {
-        // Check for shop session (new format from login)
+        const tokenPattern = /^session_([^_]+)_(driver|shop)_(\d{10,})$/;
+        // 1) Prefer dedicated shop session if present
         const storedShopSession = localStorage.getItem('shopSession');
-
         if (storedShopSession) {
             try {
                 const sessionData = JSON.parse(storedShopSession);
-                if (sessionData.shop && sessionData.sessionToken) {
-                    this.currentShop = sessionData.shop;
-                    this.sessionToken = sessionData.sessionToken;
-                    this.shopId = this.currentShop.id; // Set shopId from currentShop
-                    console.log('✅ Shop authenticated:', this.currentShop.shop_name || this.currentShop.email);
-                    console.log('Shop ID:', this.currentShop.id);
-                    return true;
-                }
+                const m = tokenPattern.exec(sessionData.sessionToken || '');
+                if (!m || m[2] !== 'shop') throw new Error('Invalid or wrong-type token in shopSession');
+                const tokenUserId = m[1];
+                const issuedAt = parseInt(m[3], 10);
+                if (!sessionData.shop || String(sessionData.shop.id) !== String(tokenUserId)) throw new Error('Token/user mismatch');
+                const now = Date.now();
+                const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+                const exp = sessionData.expiresAt ? new Date(sessionData.expiresAt).getTime() : (issuedAt + sevenDaysMs);
+                if (now > exp) throw new Error('Expired shopSession');
+
+                // Sliding window extend
+                try {
+                    sessionData.expiresAt = new Date(now + sevenDaysMs).toISOString();
+                    localStorage.setItem('shopSession', JSON.stringify(sessionData));
+                } catch (_) {}
+
+                this.currentShop = sessionData.shop;
+                this.sessionToken = sessionData.sessionToken;
+                this.shopId = this.currentShop.id;
+                console.log('✅ Shop authenticated (shopSession):', this.currentShop.shop_name || this.currentShop.email);
+                return true;
             } catch (error) {
-                console.error('Error parsing shop session:', error);
+                console.warn('Clearing invalid shopSession:', error);
                 localStorage.removeItem('shopSession');
             }
         }
 
-        // Fallback: check old format
+        // 2) Support unified userSession if it represents a shop and is not expired
+        const userSession = localStorage.getItem('userSession');
+        if (userSession) {
+            try {
+                const s = JSON.parse(userSession);
+                const m = tokenPattern.exec(s.sessionToken || '');
+                if (!m || m[2] !== 'shop') throw new Error('Invalid or wrong-type token in userSession for shop');
+                const tokenUserId = m[1];
+                const issuedAt = parseInt(m[3], 10);
+                if (s.userType !== 'shop' || !s.user || String(s.user.id) !== String(tokenUserId)) throw new Error('Token/user mismatch in userSession');
+                const now = Date.now();
+                const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+                const exp = s.expiresAt ? new Date(s.expiresAt).getTime() : (issuedAt + sevenDaysMs);
+                if (now > exp) throw new Error('Expired userSession');
+
+                // Extend expiry
+                try {
+                    s.expiresAt = new Date(now + sevenDaysMs).toISOString();
+                    localStorage.setItem('userSession', JSON.stringify(s));
+                } catch (_) {}
+
+                this.currentShop = s.user;
+                this.sessionToken = s.sessionToken;
+                this.shopId = this.currentShop.id;
+                console.log('✅ Shop authenticated (userSession):', this.currentShop.shop_name || this.currentShop.email);
+                return true;
+            } catch (e) {
+                console.warn('Shop userSession invalid for shop app:', e);
+            }
+        }
+
+        // 3) Fallback: legacy keys (must match SHOP token)
         const storedShop = localStorage.getItem('deliveryAppShop');
         const storedSession = localStorage.getItem('deliveryAppShopSession');
-
         if (storedShop && storedSession) {
             try {
-                this.currentShop = JSON.parse(storedShop);
+                const m = tokenPattern.exec(storedSession || '');
+                if (!m || m[2] !== 'shop') throw new Error('Legacy token invalid for shop');
+                const shop = JSON.parse(storedShop);
+                if (String(shop.id) !== String(m[1])) throw new Error('Legacy token user mismatch');
+                this.currentShop = shop;
                 this.sessionToken = storedSession;
-                this.shopId = this.currentShop.id; // Set shopId from currentShop
-                console.log('✅ Shop authenticated (legacy):', this.currentShop.shop_name);
-                console.log('Shop ID (legacy):', this.currentShop.id);
+                this.shopId = this.currentShop.id;
+                console.log('✅ Shop authenticated (legacy):', this.currentShop.shop_name || this.currentShop.email);
                 return true;
             } catch (error) {
-                console.error('Error parsing legacy shop data:', error);
+                console.warn('Legacy shop session invalid, clearing:', error);
+                localStorage.removeItem('deliveryAppShop');
+                localStorage.removeItem('deliveryAppShopSession');
             }
         }
 
@@ -399,6 +443,9 @@ class ShopApp {
 
     bindEvents() {
         console.log('Binding events');
+
+
+
 
         // Bottom Navigation - use proper event delegation
         document.querySelectorAll('.nav-item').forEach(navItem => {
@@ -498,6 +545,9 @@ class ShopApp {
 
         // Show selected page
         const targetPage = document.getElementById(`${page}-page`);
+
+
+
         if (targetPage) {
             targetPage.classList.add('active');
         }
@@ -563,6 +613,29 @@ class ShopApp {
     async loadShopData() {
         console.log('Loading shop data...');
         this.updateProfileDisplay();
+    }
+
+    // Prevent back navigation and show message; allow explicit logout flow
+    preventBackNavigation() {
+        try {
+            this._exitingViaLogout = false;
+            // Seed history to trap back
+            window.history.replaceState({ trap: true }, document.title, window.location.href);
+            window.history.pushState({ trap: true }, document.title, window.location.href);
+            window.addEventListener('popstate', () => {
+                if (this._exitingViaLogout) return; // allow during explicit logout
+                // Immediately re-push current state to prevent navigating away
+                window.history.pushState({ trap: true }, document.title, window.location.href);
+                try { this.showToast('You can only log out only using your log out button', 'info'); } catch (e) {}
+            });
+            // Block unloads unless logging out explicitly
+            window.addEventListener('beforeunload', (e) => {
+                if (this._exitingViaLogout) return;
+                e.preventDefault();
+                e.returnValue = '';
+                try { this.showToast('You can only log out only using your log out button', 'info'); } catch (e2) {}
+            });
+        } catch (e) { console.warn('Back prevention setup failed', e); }
     }
 
     updateProfileDisplay() {
@@ -821,6 +894,7 @@ class ShopApp {
 
     async logout() {
         console.log('Shop logging out...');
+        this._exitingViaLogout = true; // allow navigation/unload
 
         try {
             // Call server logout endpoint if we have a session token
@@ -5699,15 +5773,19 @@ class ShopApp {
                 return;
             }
 
-            // Render orders (limit to 3 for dashboard)
-            const limitedOrders = filteredOrders.slice(0, 3);
-            const ordersHTML = limitedOrders.map(order => this.createOrderCard(order)).join('');
+            // Decide how many to show before expanding
+            if (!this._dashboardShowAll) this._dashboardShowAll = { pending: false, accepted: false };
+            const showAll = !!this._dashboardShowAll[this.currentDashboardFilter];
+            const previewLimit = (this.currentDashboardFilter === 'accepted') ? 5 : 3;
+
+            const displayOrders = showAll ? filteredOrders : filteredOrders.slice(0, previewLimit);
+            const ordersHTML = displayOrders.map(order => this.createOrderCard(order)).join('');
 
             let viewAllButton = '';
-            if (filteredOrders.length > 3) {
+            if (!showAll && filteredOrders.length > previewLimit) {
                 viewAllButton = `
-                    <div style="text-align: center; padding: 16px 0 0 0;">
-                        <button onclick="shopApp.navigateToPage('orders')" style="
+                    <div style=\"text-align: center; padding: 16px 0 0 0;\">
+                        <button onclick=\"shopApp._dashboardShowAll = shopApp._dashboardShowAll || { pending: false, accepted: false }; shopApp._dashboardShowAll[shopApp.currentDashboardFilter] = true; (function(){ const o=(shopApp._ordersCache && shopApp._ordersCache.data) ? shopApp._ordersCache.data : []; shopApp.renderDashboardOrders(o, false); })();\" style=\"
                             background: transparent;
                             color: #ff6b35;
                             border: 1px solid #ff6b35;
@@ -5716,8 +5794,8 @@ class ShopApp {
                             cursor: pointer;
                             font-size: 14px;
                             font-weight: 600;
-                        ">
-                            View All ${filteredOrders.length} Orders
+                        \">
+                            Load all ${filteredOrders.length} orders
                         </button>
                     </div>
                 `;
@@ -5729,7 +5807,7 @@ class ShopApp {
             this.setupShopOrderCardClickListeners();
 
             // Initialize delivery timers for orders with delivery times
-            this.initializeShopDeliveryTimers(limitedOrders);
+            this.initializeShopDeliveryTimers(displayOrders);
 
         } catch (error) {
             console.error('Error loading dashboard orders:', error);
@@ -5824,20 +5902,24 @@ class ShopApp {
             return;
         }
 
-        // Render orders (limit to 3 for dashboard)
-        const limitedOrders = filteredOrders.slice(0, 3);
-        const ordersHTML = limitedOrders.map(order => this.createOrderCard(order)).join('');
+        // Decide how many to show before expanding
+        if (!this._dashboardShowAll) this._dashboardShowAll = { pending: false, accepted: false };
+        const showAll = !!this._dashboardShowAll[this.currentDashboardFilter];
+        const previewLimit = (this.currentDashboardFilter === 'accepted') ? 5 : 3;
+
+        const displayOrders = showAll ? filteredOrders : filteredOrders.slice(0, previewLimit);
+        const ordersHTML = displayOrders.map(order => this.createOrderCard(order)).join('');
 
         let viewAllButton = '';
-        if (filteredOrders.length > 3) {
+        if (!showAll && filteredOrders.length > previewLimit) {
             viewAllButton = `
                 <div style="text-align: center; padding: 16px 0 0 0;">
-                    <button onclick="shopApp.navigateToPage('orders')" style="
+                    <button onclick="shopApp._dashboardShowAll = shopApp._dashboardShowAll || { pending: false, accepted: false }; shopApp._dashboardShowAll[shopApp.currentDashboardFilter] = true; (function(){ const o=(shopApp._ordersCache && shopApp._ordersCache.data) ? shopApp._ordersCache.data : []; shopApp.renderDashboardOrders(o, false); })();" style="
                         background: transparent; color: #ff6b35; border: 1px solid #ff6b35;
                         padding: 8px 16px; border-radius: 6px; cursor: pointer;
                         font-size: 14px; font-weight: 600;
                     ">
-                        View All ${filteredOrders.length} Orders
+                        Load all ${filteredOrders.length} orders
                     </button>
                 </div>
             `;
@@ -5850,11 +5932,14 @@ class ShopApp {
         this.setupShopOrderCardClickListeners();
 
         // Initialize delivery timers for orders with delivery times
-        this.initializeShopDeliveryTimers(limitedOrders);
+        this.initializeShopDeliveryTimers(displayOrders);
     }
 
     // Background refresh for dashboard orders
     async refreshDashboardOrdersBackground() {
+
+
+
         try {
             const orders = await this.loadShopOrders();
             this.renderDashboardOrders(orders, false);
@@ -5873,6 +5958,9 @@ class ShopApp {
 
         // Load orders content
         await this.loadOrdersContent();
+
+
+
     }
 
     setupOrdersEventListeners() {
@@ -5884,6 +5972,7 @@ class ShopApp {
     async loadOrdersContent() {
         const contentArea = document.getElementById('shop-orders-content');
         if (!contentArea) return;
+
 
         try {
             // For History page, load completed orders with optimization
@@ -6055,6 +6144,9 @@ class ShopApp {
 
         const now = Date.now();
         const cacheFreshMs = 2 * 60 * 1000; // 2 minute client cache
+
+
+
 
         const dateYMD = this.getTodayYMD();
 
@@ -6287,7 +6379,7 @@ class ShopApp {
                             </div>
                             <div>
                                 <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">
-                                    ${order.users?.name || order.driver_name || order.users?.email || order.driver_email || 'Unknown Driver'}
+                                    ${this.getDriverDisplayName(order)}
                                 </div>
                                 <div style="color: #6b7280; font-size: 11px;">Driver</div>
                             </div>
@@ -6441,7 +6533,9 @@ class ShopApp {
         const orderPrice = parseFloat(order.order_amount || 0).toFixed(2);
 
         // Driver info section (for accepted orders)
-        const driverInfo = (order.users && order.users.email) ? `
+        const driverDisplayName = this.getDriverDisplayName(order);
+        const hasDriverAssigned = !!(order.driver_id || (order.users && (order.users.name || order.users.email)) || order.driver_name);
+        const driverInfo = hasDriverAssigned ? `
             <div style="
                 background: #f0f9ff;
                 border: 1px solid #e0f2fe;
@@ -6453,7 +6547,7 @@ class ShopApp {
                 <div style="font-size: 11px; color: #6b7280; margin-bottom: 2px; text-transform: uppercase; font-weight: 600;">Assigned Driver</div>
                 <div style="font-size: 13px; font-weight: 600; color: #1e40af;">
                     <i class="fas fa-user" style="margin-right: 6px; font-size: 11px;"></i>
-                    ${order.users.name || order.users.email || 'Driver'}
+                    ${driverDisplayName}
                 </div>
             </div>
         ` : '';
@@ -6620,12 +6714,9 @@ class ShopApp {
                                 align-items: center;
                                 gap: 6px;
                             ">
-                                ${(order.users && order.users.email) ? `
+                                ${(order.driver_id || order.users) ? `
                                     <i class="fas fa-user" style="color: ${statusColor}; font-size: 12px;"></i>
-                                    ${order.users.name || order.users.email || 'Driver'}
-                                ` : order.driver_id ? `
-                                    <i class="fas fa-user" style="color: ${statusColor}; font-size: 12px;"></i>
-                                    Driver #${order.driver_id}
+                                    ${this.getDriverDisplayName(order)}
                                 ` : `
                                     <i class="fas fa-user-slash" style="color: #6b7280; font-size: 12px;"></i>
                                     <span style="color: #6b7280;">None</span>
@@ -7155,6 +7246,36 @@ class ShopApp {
         if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
         if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
         return `${Math.floor(diffInSeconds / 86400)}d ago`;
+    }
+
+
+    // Prefer driver's real name; avoid showing raw UUIDs
+    getDriverDisplayName(order) {
+        try {
+            const u = order && order.users ? order.users : {};
+            // 1) Real name first (supports various fields)
+            const nameParts = [];
+            if (u.first_name) nameParts.push(u.first_name);
+            if (u.last_name) nameParts.push(u.last_name);
+            const composed = nameParts.join(' ').trim();
+            const candidate = u.name || u.full_name || composed || order.driver_name;
+            if (candidate && String(candidate).trim().length > 0) return String(candidate).trim();
+            // 2) Email local-part as a very last resort (not great, but better than UUID)
+            const email = u.email || order.driver_email;
+            if (email && String(email).includes('@')) return String(email).split('@')[0];
+            // 3) If we only have an ID, show it only when it's short numeric (not UUIDs)
+            if (order && order.driver_id != null) {
+                const idStr = String(order.driver_id);
+                const isNumeric = /^[0-9]+$/.test(idStr);
+                const isUuidLike = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(idStr);
+                if (isNumeric && idStr.length <= 6) return `Driver #${idStr}`;
+                if (!isUuidLike && idStr.length <= 8) return `Driver #${idStr}`; // short non-UUID fallback
+            }
+            // 4) Generic fallback
+            return 'Driver';
+        } catch (_) {
+            return 'Driver';
+        }
     }
 
     // Initialize delivery timers for shop orders that have delivery times set

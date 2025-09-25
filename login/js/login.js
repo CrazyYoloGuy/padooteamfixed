@@ -23,33 +23,52 @@ class LoginApp {
         const storedUser = localStorage.getItem('deliveryAppUser');
         const storedSession = localStorage.getItem('deliveryAppSession');
         const userSession = localStorage.getItem('userSession');
-        
-        // Check if user is already logged in
-        if ((storedUser && storedSession) || userSession) {
-            // User is already logged in, redirect to appropriate app
-            let userType = 'driver'; // Default
-            
-            if (userSession) {
-                try {
-                    const sessionData = JSON.parse(userSession);
-                    userType = sessionData.userType || 'driver';
-                } catch (e) {
-                    console.error('Error parsing user session:', e);
+
+        // Prefer new session structure if present and not expired
+        if (userSession) {
+            try {
+                const sessionData = JSON.parse(userSession);
+                const expiresAt = sessionData.expiresAt ? new Date(sessionData.expiresAt).getTime() : null;
+                const now = Date.now();
+                if (expiresAt && now > expiresAt) {
+                    // Expired: clear and stay on login
+                    localStorage.removeItem('userSession');
+                    localStorage.removeItem('deliveryAppUser');
+                    localStorage.removeItem('deliveryAppSession');
+                    console.warn('Stored session expired; staying on login page');
+                    return;
                 }
+
+                // Valid session: redirect
+                const userType = sessionData.userType || 'driver';
+
+                // Prevent back button navigation
+                window.history.replaceState(null, null, window.location.href);
+                window.addEventListener('popstate', () => {
+                    window.history.pushState(null, null, window.location.href);
+                });
+
+                if (userType === 'shop') {
+                    window.location.href = '/shop';
+                } else {
+                    window.location.href = '/app';
+                }
+                return;
+            } catch (e) {
+                console.error('Error parsing user session:', e);
+                // Fall through to legacy keys check
             }
-            
+        }
+
+        // Legacy keys fallback (no expiry info)
+        if (storedUser && storedSession) {
             // Prevent back button navigation
             window.history.replaceState(null, null, window.location.href);
             window.addEventListener('popstate', () => {
                 window.history.pushState(null, null, window.location.href);
             });
-            
-            // Redirect based on user type
-            if (userType === 'shop') {
-                window.location.href = '/shop';
-            } else {
+
             window.location.href = '/app';
-            }
         }
     }
     
@@ -84,21 +103,24 @@ class LoginApp {
 
             if (result.success) {
                 // Store user data and session with proper session structure
+                const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
                 const sessionData = {
                     user: result.user,
                     sessionToken: result.sessionToken,
-                    userType: result.userType
+                    userType: result.userType,
+                    // Persistent login: expire after 7 days on same device
+                    expiresAt: new Date(Date.now() + sevenDaysMs).toISOString()
                 };
-                
+
                 localStorage.setItem('userSession', JSON.stringify(sessionData));
-                
+
                 // Also store in legacy format for backward compatibility
                 localStorage.setItem('deliveryAppUser', JSON.stringify(result.user));
                 localStorage.setItem('deliveryAppSession', result.sessionToken);
-                
+
                 const userName = result.user.name || result.user.email?.split('@')[0] || 'User';
                 this.showToast(`Welcome back, ${userName}!`, 'success');
-                
+
                 // Redirect based on user type
                 setTimeout(() => {
                     if (result.redirectUrl) {
@@ -111,7 +133,7 @@ class LoginApp {
                         window.location.href = '/app'; // Default to driver app
                     }
                 }, 1000);
-                
+
             } else {
                 this.showToast(result.message || 'Login failed', 'error');
             }
