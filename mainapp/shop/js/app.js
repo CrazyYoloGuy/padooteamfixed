@@ -24,6 +24,9 @@ class ShopApp {
         this.teamMembersCacheTime = null;
         this.isLoadingTeamMembers = false;
         this.loadingPromises = new Map(); // Prevent duplicate API calls
+        // UI optimization: show only latest team members until expanded
+        this.showAllTeamMembers = false;
+
 
         this.driverSearchCache = {};
         this.driverSearchDebounce = null;
@@ -310,8 +313,11 @@ class ShopApp {
             return;
         }
 
-        // Create optimized team list with virtual scrolling for large teams
-        const teamHTML = this.selectedDrivers.map((driver, index) => `
+        // Show only last 5 joined by default for performance; allow expand to all
+        const sorted = [...this.selectedDrivers].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        const display = this.showAllTeamMembers ? sorted : sorted.slice(0, 5);
+
+        const teamHTML = display.map((driver, index) => `
             <div class="team-member-card" data-driver-id="${driver.id}" style="animation-delay: ${index * 50}ms">
                 <div class="team-member-avatar">
                     <i class="fas fa-user"></i>
@@ -339,16 +345,17 @@ class ShopApp {
                 ${teamHTML}
             </div>
             <div class="my-team-actions">
-                <button class="btn btn-primary" onclick="shopApp.refreshTeamMembers()">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
+                ${!this.showAllTeamMembers ? `
+                    <button class="btn btn-primary" onclick="(function(app){ app.showAllTeamMembers = true; app.renderDeliveryTeamForAlerts(); })(shopApp)">
+                        <i class=\"fas fa-list\"></i> Load All
+                    </button>` : ''}
                 <button class="btn btn-secondary" onclick="shopApp.navigateToPage('settings')">
                     <i class="fas fa-cog"></i> Manage Team
                 </button>
             </div>
         `;
 
-        console.log(`✅ Rendered ${teamCount} team members`);
+        console.log(`✅ Rendered ${display.length}/${teamCount} team members (showAll=${this.showAllTeamMembers})`);
     }
 
     checkAuthStatus() {

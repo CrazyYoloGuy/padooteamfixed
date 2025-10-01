@@ -503,6 +503,9 @@ class Dashboard {
                     <button class="action-btn money" onclick="openShopEarningsOverride('${shop.id}')" title="Set driver earning per order">
                         <i class="fas fa-dollar-sign"></i>
                     </button>
+                    <button class="action-btn team" onclick="dashboard.openShopTeamModal('${shop.id}')" title="Manage Team">
+                        <i class="fas fa-user"></i>
+                    </button>
                     <button class="action-btn delete" onclick="dashboard.deleteShop('${shop.id}')" title="Delete Shop">
                         <i class="fas fa-trash"></i>
                     </button>
@@ -741,6 +744,9 @@ class Dashboard {
                     </button>
                     <button class="action-btn money" onclick="openShopEarningsOverride('${shop.id}')" title="Set driver earning per order">
                         <i class="fas fa-dollar-sign"></i>
+                    </button>
+                    <button class="action-btn team" onclick="dashboard.openShopTeamModal('${shop.id}')" title="Manage Team">
+                        <i class="fas fa-user"></i>
                     </button>
                     <button class="action-btn delete" onclick="dashboard.deleteShop('${shop.id}')" title="Delete Shop">
                         <i class="fas fa-trash"></i>
@@ -1582,41 +1588,43 @@ class Dashboard {
         overlay.className = 'modal-overlay';
 
         overlay.innerHTML = `
-            <div class="modal">
+            <div class="modal shop-info-modal">
                 <div class="modal-header">
                     <h3><i class="fas fa-store"></i> Shop Information - ${shop.shop_name}</h3>
                 </div>
+                <div class="modal-tabs">
+                    <button class="tab-btn active" data-tab="basic"><i class="fas fa-info-circle"></i> Basic Info</button>
+                    <button class="tab-btn" data-tab="orders"><i class="fas fa-shopping-bag"></i> Orders Info</button>
+                </div>
                 <div class="modal-body">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <h4 style="margin: 0 0 10px 0; color: var(--primary-color);">Basic Information</h4>
-                            <div class="info-item">
-                                <strong>Shop Name:</strong> ${shop.shop_name || 'N/A'}
+                    <div id="basic-tab" class="tab-content active">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                            <div>
+                                <h4 style="margin: 0 0 10px 0; color: var(--primary-color);">Basic Information</h4>
+                                <div class="info-item"><strong>Shop Name:</strong> ${shop.shop_name || 'N/A'}</div>
+                                <div class="info-item"><strong>Email:</strong> ${shop.email || 'N/A'}</div>
+                                <div class="info-item"><strong>Status:</strong> <span class="shop-status ${shop.status || 'active'}">${shop.status || 'active'}</span></div>
+                                <div class="info-item"><strong>AFM:</strong> ${shop.afm || 'N/A'}</div>
                             </div>
-                            <div class="info-item">
-                                <strong>Email:</strong> ${shop.email || 'N/A'}
-                            </div>
-                            <div class="info-item">
-                                <strong>Status:</strong>
-                                <span class="shop-status ${shop.status || 'active'}">${shop.status || 'active'}</span>
-                            </div>
-                            <div class="info-item">
-                                <strong>AFM:</strong> ${shop.afm || 'N/A'}
+                            <div>
+                                <h4 style="margin: 0 0 10px 0; color: var(--primary-color);">Contact Details</h4>
+                                <div class="info-item"><strong>Contact Person:</strong> ${shop.contact_person || 'N/A'}</div>
+                                <div class="info-item"><strong>Phone:</strong> ${shop.phone || 'N/A'}</div>
+                                <div class="info-item"><strong>Address:</strong> ${shop.address || 'N/A'}</div>
+                                <div class="info-item"><strong>Created:</strong> ${this.formatDate(shop.created_at)}</div>
                             </div>
                         </div>
-                        <div>
-                            <h4 style="margin: 0 0 10px 0; color: var(--primary-color);">Contact Details</h4>
-                            <div class="info-item">
-                                <strong>Contact Person:</strong> ${shop.contact_person || 'N/A'}
-                            </div>
-                            <div class="info-item">
-                                <strong>Phone:</strong> ${shop.phone || 'N/A'}
-                            </div>
-                            <div class="info-item">
-                                <strong>Address:</strong> ${shop.address || 'N/A'}
-                            </div>
-                            <div class="info-item">
-                                <strong>Created:</strong> ${this.formatDate(shop.created_at)}
+                    </div>
+                    <div id="orders-tab" class="tab-content" style="display:none;">
+                        <div class="orders-controls" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+                            <label style="font-weight:600; color:var(--text-primary);">Month:</label>
+                            <input type="month" id="ordersMonth" value="${new Date().toISOString().slice(0,7)}" />
+                            <button class="btn primary" id="ordersMonthBtn"><i class="fas fa-chart-bar"></i> Show</button>
+                        </div>
+                        <div id="ordersSummary" class="orders-summary" style="display:flex; gap:16px; flex-wrap:wrap;">
+                            <div class="stat-card" style="background:var(--surface-tertiary); border:1px solid var(--border); border-radius:12px; padding:14px 16px; min-width:180px;">
+                                <div class="stat-label" style="color:var(--text-secondary); font-size:12px;">Total orders</div>
+                                <div class="stat-value" id="ordersCount" style="font-size:22px; font-weight:700; color:var(--text-primary);">...</div>
                             </div>
                         </div>
                     </div>
@@ -1626,11 +1634,275 @@ class Dashboard {
                     <button class="btn primary" onclick="dashboard.editShop('${shop.id}')">Edit Shop</button>
                 </div>
             </div>
+
         `;
 
         document.body.appendChild(overlay);
         overlay.classList.add('active');
+
+        // Tab switching and Orders Info loader
+        const tabBtns = overlay.querySelectorAll('.modal-tabs .tab-btn');
+        const basicTab = overlay.querySelector('#basic-tab');
+        const ordersTab = overlay.querySelector('#orders-tab');
+        let ordersLoaded = false;
+
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const tab = btn.getAttribute('data-tab');
+                if (tab === 'basic') {
+                    basicTab.style.display = '';
+                    ordersTab.style.display = 'none';
+                } else {
+                    basicTab.style.display = 'none';
+                    ordersTab.style.display = '';
+                    if (!ordersLoaded) {
+                        loadOrdersForMonth().catch(() => {});
+                    }
+                }
+            });
+        });
+
+        const monthInput = overlay.querySelector('#ordersMonth');
+        const monthBtn = overlay.querySelector('#ordersMonthBtn');
+        const ordersCountEl = overlay.querySelector('#ordersCount');
+
+        async function loadOrdersForMonth() {
+            if (!monthInput || !ordersCountEl) return;
+            const month = monthInput.value || new Date().toISOString().slice(0,7);
+            ordersCountEl.textContent = '...';
+            try {
+                // Try monthly analytics endpoint first
+                const res = await fetch(`/api/shop/${shopIdStr}/analytics/monthly?month=${encodeURIComponent(month)}`);
+                let total = null;
+                if (res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    total = (data && (data.summary?.total_orders ?? data.total_orders));
+                }
+                // Fallback: admin orders endpoint filtered client-side
+                if (typeof total !== 'number') {
+                    const res2 = await fetch(`/api/admin/orders`);
+                    if (res2.ok) {
+                        const data2 = await res2.json().catch(() => ({ data: [] }));
+                        const rows = Array.isArray(data2) ? data2 : (data2.data || []);
+                        const count = rows.filter(r => String(r.shop_account_id || r.shop_id || r.shop)?.toString() === shopIdStr &&
+                            (r.created_at || r.order_created_at || r.timestamp || '').slice(0,7) === month).length;
+                        total = count;
+                    } else {
+                        throw new Error('Failed to load orders');
+                    }
+                }
+                ordersCountEl.textContent = typeof total === 'number' ? String(total) : '0';
+                ordersLoaded = true;
+            } catch (e) {
+                console.warn('Orders month load failed', e);
+                ordersCountEl.textContent = '0';
+            }
+        }
+
+        monthBtn && monthBtn.addEventListener('click', () => {
+            loadOrdersForMonth();
+        });
     }
+
+
+    openShopTeamModal(shopId) {
+        const shopIdStr = String(shopId);
+        const shop = this.shops.find(s => String(s.id) === shopIdStr);
+        if (!shop) {
+            this.showToast('Shop not found', 'error');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal team-modal">
+                <div class="modal-header">
+                    <h3><i class="fas fa-user"></i> Manage Team - ${shop.shop_name || shop.name || 'Shop'} (#${shop.id})</h3>
+                </div>
+                <div class="modal-body">
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+                        <button class="btn primary" id="addAllDriversBtn"><i class="fas fa-user-plus"></i> Add All</button>
+                        <button class="btn danger" id="removeAllDriversBtn"><i class="fas fa-user-minus"></i> Remove All</button>
+                        <div id="teamOpsStatus" style="margin-left:auto; color: var(--text-muted); font-size: 12px;"></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                        <div class="panel" style="border:1px solid var(--border-color); border-radius:8px; overflow:hidden;">
+                            <div style="padding:10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:8px;">
+                                <i class="fas fa-users"></i>
+                                <strong>Team Members</strong>
+                                <span id="teamCount" style="margin-left:auto; font-size:12px;"></span>
+                            </div>
+                            <div style="padding:10px;">
+                                <div class="search-wrap" style="position:relative; margin-bottom:8px;">
+                                    <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color: var(--text-muted);"></i>
+                                    <input id="teamSearch" type="text" placeholder="Search team..." class="search-field" style="width:100%; padding:8px 10px 8px 30px; border:1px solid var(--border-color); border-radius:6px;">
+                                </div>
+                                <div id="teamList" style="max-height:420px; overflow:auto;"></div>
+                            </div>
+                        </div>
+                        <div class="panel" style="border:1px solid var(--border-color); border-radius:8px; overflow:hidden;">
+                            <div style="padding:10px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:8px;">
+                                <i class="fas fa-user-friends"></i>
+                                <strong>Available Drivers</strong>
+                                <span id="availCount" style="margin-left:auto; font-size:12px;"></span>
+                            </div>
+                            <div style="padding:10px;">
+                                <div class="search-wrap" style="position:relative; margin-bottom:8px;">
+                                    <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color: var(--text-muted);"></i>
+                                    <input id="availSearch" type="text" placeholder="Search drivers..." class="search-field" style="width:100%; padding:8px 10px 8px 30px; border:1px solid var(--border-color); border-radius:6px;">
+                                </div>
+                                <div id="availList" style="max-height:420px; overflow:auto;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn secondary" onclick="dashboard.closeModal()">Close</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => overlay.classList.add('active'));
+
+        const ensureUsersLoaded = async () => {
+            if (!Array.isArray(this.users) || this.users.length === 0) {
+                try { await this.loadUsers?.(); } catch (e) { /* ignore */ }
+            }
+        };
+
+        const fetchTeam = async () => {
+            const res = await fetch(`/api/shop/${shopIdStr}/selected-drivers`);
+            if (!res.ok) throw new Error('Failed to load team');
+            const json = await res.json();
+            if (!json.success) throw new Error(json.message || 'Failed to load team');
+            const members = Array.isArray(json.selectedDrivers) ? json.selectedDrivers : (Array.isArray(json.drivers) ? json.drivers : (Array.isArray(json.members) ? json.members : json.data || []));
+            return members;
+        };
+
+        const byId = obj => String(obj?.id ?? obj?.user_id ?? obj?.driver_id);
+        const normalize = d => ({ id: d?.id ?? d?.user_id ?? d?.driver_id, email: d?.email || d?.user_email || d?.username || d?.name || `ID ${d?.id ?? d?.user_id ?? d?.driver_id}` });
+
+        let allDrivers = [];
+        let team = [];
+        let available = [];
+
+        const refs = {
+            teamList: overlay.querySelector('#teamList'),
+            availList: overlay.querySelector('#availList'),
+            teamSearch: overlay.querySelector('#teamSearch'),
+            availSearch: overlay.querySelector('#availSearch'),
+            teamCount: overlay.querySelector('#teamCount'),
+            availCount: overlay.querySelector('#availCount'),
+            addAllBtn: overlay.querySelector('#addAllDriversBtn'),
+            removeAllBtn: overlay.querySelector('#removeAllDriversBtn'),
+            status: overlay.querySelector('#teamOpsStatus'),
+        };
+
+        const renderList = (arr, container, isTeam, filter) => {
+            const q = (filter || '').trim().toLowerCase();
+            const filtered = q ? arr.filter(d => (d.email || '').toLowerCase().includes(q)) : arr;
+            container.innerHTML = filtered.map(d => `
+              <div class="list-item" style="display:flex; align-items:center; justify-content:space-between; padding:6px 8px; border-bottom:1px solid var(--border-color);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <i class="fas ${isTeam ? 'fa-user-check' : 'fa-user'}" style="color:${isTeam ? '#10b981' : 'var(--text-muted)'}"></i>
+                  <span>${d.email || 'Unknown'} <small style="color:var(--text-muted)">#${d.id}</small></span>
+                </div>
+                <button class="btn ${isTeam ? 'danger' : 'primary'} btn-sm" data-action="${isTeam ? 'remove' : 'add'}" data-id="${d.id}">
+                  <i class="fas ${isTeam ? 'fa-user-minus' : 'fa-user-plus'}"></i>
+                </button>
+              </div>
+            `).join('') || `<div style="padding:8px; color:var(--text-muted);">No results</div>`;
+            container.querySelectorAll('button[data-action]').forEach(btn => {
+                btn.onclick = async () => {
+                    const id = btn.getAttribute('data-id');
+                    try {
+                        btn.disabled = true;
+                        if (isTeam) {
+                            await doRemove(id);
+                        } else {
+                            await doAdd(id);
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(e.message || 'Operation failed', 'error');
+                    } finally {
+                        btn.disabled = false;
+                    }
+                };
+            });
+            if (isTeam) refs.teamCount.textContent = `${filtered.length} shown`;
+            else refs.availCount.textContent = `${filtered.length} shown`;
+        };
+
+        const render = () => {
+            renderList(team, refs.teamList, true, refs.teamSearch.value);
+            renderList(available, refs.availList, false, refs.availSearch.value);
+        };
+
+        const refresh = async () => {
+            await ensureUsersLoaded();
+            const driversRaw = (this.users || []).filter(u => String(u.user_type || '').toLowerCase() === 'driver');
+            allDrivers = driversRaw.map(normalize);
+            const teamRaw = await fetchTeam();
+            const teamIdsSet = new Set(teamRaw.map(byId));
+            team = allDrivers.filter(d => teamIdsSet.has(String(d.id)));
+            available = allDrivers.filter(d => !teamIdsSet.has(String(d.id)));
+            render();
+        };
+
+        const doAdd = async (driverId) => {
+            const res = await fetch(`/api/shop/${shopIdStr}/add-driver`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ driverId }) });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) throw new Error(json.message || 'Failed to add driver');
+            this.showToast('Driver added to team', 'success');
+            await refresh();
+        };
+
+        const doRemove = async (driverId) => {
+            const res = await fetch(`/api/shop/${shopIdStr}/remove-driver/${driverId}`, { method: 'DELETE' });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) throw new Error(json.message || 'Failed to remove driver');
+            this.showToast('Driver removed from team', 'success');
+            await refresh();
+        };
+
+        refs.addAllBtn.onclick = async () => {
+            if (!confirm('Add ALL available drivers to this shop?')) return;
+            try {
+                refs.status.textContent = 'Adding all...';
+                for (const d of available) {
+                    try { await doAdd(d.id); } catch (e) { /* continue */ }
+                }
+            } finally {
+                refs.status.textContent = '';
+            }
+        };
+
+        refs.removeAllBtn.onclick = async () => {
+            if (!confirm('Remove ALL drivers from this shop?')) return;
+            try {
+                refs.status.textContent = 'Removing all...';
+                for (const d of team) {
+                    try { await doRemove(d.id); } catch (e) { /* continue */ }
+                }
+            } finally {
+                refs.status.textContent = '';
+            }
+        };
+
+        refs.teamSearch.oninput = render;
+        refs.availSearch.oninput = render;
+
+        refresh().catch(err => {
+            console.error(err);
+            this.showToast(err.message || 'Failed to load team', 'error');
+        });
+    }
+
 
     async deleteShop(shopId) {
         const shopIdStr = String(shopId);
