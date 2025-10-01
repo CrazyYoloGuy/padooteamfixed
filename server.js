@@ -3381,6 +3381,96 @@ app.get('/api/shop/:shopId/analytics/monthly', authenticateUser, async (req, res
     }
 });
 
+// GET /api/admin/shop/:shopId/analytics/monthly - Monthly summary for admin (no auth)
+app.get('/api/admin/shop/:shopId/analytics/monthly', async (req, res) => {
+    try {
+        const { shopId } = req.params;
+        const { month } = req.query; // format YYYY-MM
+
+        const now = new Date();
+        const toYM = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthStr = month || toYM(now);
+
+        // Compute start/end of month in local time, then ISO
+        const [yStr, mStr] = monthStr.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10) - 1; // 0-based
+        const startLocal = new Date(y, m, 1, 0, 0, 0);
+        const endLocal = new Date(y, m + 1, 1, 0, 0, 0);
+        const startISO = startLocal.toISOString();
+        const endISO = endLocal.toISOString();
+
+        // Fetch delivered orders for the month
+        const { data, error } = await supabase
+            .from('shop_orders')
+            .select('id, shop_account_id, driver_id, order_amount, status, created_at')
+            .eq('shop_account_id', shopId)
+            .eq('status', 'delivered')
+            .gte('created_at', startISO)
+            .lt('created_at', endISO)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Admin monthly analytics query error:', error);
+            return res.status(500).json({ success: false, message: 'Failed to load monthly analytics' });
+        }
+
+        const ordersAll = data || [];
+
+        // Totals
+        let totalRevenue = 0;
+        const driverCount = new Map();
+        const perDay = new Map(); // YYYY-MM-DD -> count
+        const toYMD = (d) => {
+            const dt = new Date(d);
+            const yy = dt.getFullYear();
+            const mm = String(dt.getMonth() + 1).padStart(2, '0');
+            const dd = String(dt.getDate()).padStart(2, '0');
+            return `${yy}-${mm}-${dd}`;
+        };
+
+        for (const o of ordersAll) {
+            totalRevenue += parseFloat(o.order_amount || 0);
+            if (o.driver_id) driverCount.set(o.driver_id, (driverCount.get(o.driver_id) || 0) + 1);
+            const day = toYMD(o.created_at);
+            perDay.set(day, (perDay.get(day) || 0) + 1);
+        }
+
+        // Peak day
+        let peakDay = null;
+        let peakDayCount = 0;
+        for (const [day, cnt] of perDay.entries()) {
+            if (cnt > peakDayCount) { peakDayCount = cnt; peakDay = day; }
+        }
+
+        // Top driver info
+        let topDriverId = null, topDriverCount = 0;
+        for (const [id, cnt] of driverCount.entries()) {
+            if (cnt > topDriverCount) { topDriverCount = cnt; topDriverId = id; }
+        }
+        let topDriver = null;
+        if (topDriverId) {
+            const { data: d } = await supabase.from('users').select('id, email, name').eq('id', topDriverId).limit(1);
+            if (d && d.length) topDriver = { id: d[0].id, name: d[0].name || 'Driver', email: d[0].email, delivered: topDriverCount };
+        }
+
+        const summary = {
+            month: monthStr,
+            total_orders: ordersAll.length,
+            total_revenue: Number(totalRevenue.toFixed(2)),
+            peak_day: peakDay,
+            peak_day_count: peakDayCount,
+            top_driver: topDriver
+        };
+
+        res.json({ success: true, summary });
+    } catch (e) {
+        console.error('Admin monthly analytics error:', e);
+        res.status(500).json({ success: false, message: 'Monthly analytics error' });
+    }
+});
+
+
 // GET /api/driver/:driverId/analytics - Daily analytics for a driver
 app.get('/api/driver/:driverId/analytics', authenticateUser, async (req, res) => {
     try {

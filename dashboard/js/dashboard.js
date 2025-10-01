@@ -6,9 +6,11 @@ class Dashboard {
         this.categories = [];
         this.stats = {};
         this.filteredShops = [];
-        this.shopsToShow = 4;
+        this.shopsToShow = 12;
         this.shopFilter = 'all';
         this.shopObserver = null;
+        this.categoryFilterId = null;
+
         this.filteredDrivers = [];
         this.driversToShow = 4;
         this.driverObserver = null;
@@ -131,6 +133,8 @@ class Dashboard {
             this.applyShopFilter();
             const grid = document.getElementById('shops-grid');
             if (grid) grid.scrollTop = 0;
+    // If a category filter was pre-set, honor it after loading shops
+    if (this.categoryFilterId != null) { this.applyShopFilter(); }
         } else if (section === 'categories') {
             this.loadCategories();
         } else if (section === 'announcements') {
@@ -520,7 +524,7 @@ class Dashboard {
             loadMoreBtn.style = 'margin: 32px auto 0; display: block;';
             loadMoreBtn.innerHTML = '<i class="fas fa-plus"></i> Load More';
             loadMoreBtn.onclick = () => {
-                this.shopsToShow += 4;
+                this.shopsToShow += 12;
                 this.renderShops();
             };
             container.appendChild(loadMoreBtn);
@@ -762,7 +766,7 @@ class Dashboard {
             loadMoreBtn.style = 'margin: 32px auto 0; display: block;';
             loadMoreBtn.innerHTML = '<i class="fas fa-plus"></i> Load More';
             loadMoreBtn.onclick = () => {
-                this.shopsToShow += 4;
+                this.shopsToShow += 12;
                 this.renderShops();
             };
             container.appendChild(loadMoreBtn);
@@ -1673,14 +1677,33 @@ class Dashboard {
             const month = monthInput.value || new Date().toISOString().slice(0,7);
             ordersCountEl.textContent = '...';
             try {
-                // Try monthly analytics endpoint first
-                const res = await fetch(`/api/shop/${shopIdStr}/analytics/monthly?month=${encodeURIComponent(month)}`);
+                const adminToken = localStorage.getItem('admin_session_token');
+                const authHeaders = adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {};
+
+                // Try admin monthly analytics endpoint first (no auth required)
                 let total = null;
-                if (res.ok) {
-                    const data = await res.json().catch(() => ({}));
-                    total = (data && (data.summary?.total_orders ?? data.total_orders));
+                try {
+                    const resAdmin = await fetch(`/api/admin/shop/${shopIdStr}/analytics/monthly?month=${encodeURIComponent(month)}`);
+                    if (resAdmin.ok) {
+                        const dataA = await resAdmin.json().catch(() => ({}));
+                        total = (dataA && (dataA.summary?.total_orders ?? dataA.total_orders));
+                    }
+                } catch (e) { /* try next */ }
+
+                // Fallback: shop monthly endpoint with Authorization header
+                if (typeof total !== 'number') {
+                    try {
+                        const res = await fetch(`/api/shop/${shopIdStr}/analytics/monthly?month=${encodeURIComponent(month)}`, {
+                            headers: authHeaders
+                        });
+                        if (res.ok) {
+                            const data = await res.json().catch(() => ({}));
+                            total = (data && (data.summary?.total_orders ?? data.total_orders));
+                        }
+                    } catch (e) { /* try next */ }
                 }
-                // Fallback: admin orders endpoint filtered client-side
+
+                // Final fallback: admin orders endpoint filtered client-side (no auth required)
                 if (typeof total !== 'number') {
                     const res2 = await fetch(`/api/admin/orders`);
                     if (res2.ok) {
@@ -2061,13 +2084,19 @@ class Dashboard {
     }
 
     applyShopFilter() {
-        if (this.shopFilter === 'all') {
-            this.filteredShops = this.shops;
-        } else {
-            this.filteredShops = this.shops.filter(shop => shop.status === this.shopFilter);
+        let list = this.shops || [];
+        // status filter
+        if (this.shopFilter && this.shopFilter !== 'all') {
+            list = list.filter(shop => shop.status === this.shopFilter);
         }
+        // category filter
+        if (this.categoryFilterId != null) {
+            const cid = Number(this.categoryFilterId);
+            list = list.filter(shop => Number(shop.category_id) === cid);
+        }
+        this.filteredShops = list;
         console.log('Filtered shops:', this.filteredShops.length);
-        this.shopsToShow = 4;
+        this.shopsToShow = 12;
         this.renderShops();
     }
 
@@ -2668,7 +2697,7 @@ class Dashboard {
         }
 
         container.innerHTML = this.categories.map(category => `
-            <div class="category-card" style="--category-color: ${category.color}">
+            <div class="category-card" style="--category-color: ${category.color}" onclick="viewCategoryShops(${category.id})">
                 <div class="category-status ${category.is_active ? 'active' : 'inactive'}">
                     ${category.is_active ? 'Active' : 'Inactive'}
                 </div>
@@ -2695,11 +2724,12 @@ class Dashboard {
                 </div>
 
                 <div class="category-actions">
-                    <button class="category-action-btn edit" onclick="dashboard.editCategory(${category.id})">
+                    <button class="category-action-btn edit" onclick="event.stopPropagation(); dashboard.editCategory(${category.id})">
                         <i class="fas fa-edit"></i>
                         Edit
                     </button>
-                    <button class="category-action-btn delete" onclick="dashboard.deleteCategory(${category.id})">
+
+                    <button class="category-action-btn delete" onclick="event.stopPropagation(); dashboard.deleteCategory(${category.id})">
                         <i class="fas fa-trash"></i>
                         Delete
                     </button>
@@ -2707,6 +2737,71 @@ class Dashboard {
             </div>
         `).join('');
     }
+
+    async openCategoryShopsModal(categoryId) {
+        try {
+            const cid = Number(categoryId);
+            // Ensure shops loaded
+            if (!Array.isArray(this.shops) || this.shops.length === 0) {
+                try { await this.loadShops(); } catch (e) { /* ignore */ }
+            }
+            const category = (this.categories || []).find(c => Number(c.id) === cid);
+            const title = category ? category.name : `Category ${cid}`;
+            const list = (this.shops || []).filter(s => Number(s.category_id) === cid);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay active';
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); document.body.style.overflow = 'auto'; } });
+            const uid = 'catshops-' + Math.random().toString(36).slice(2);
+            overlay.innerHTML = `
+                <div class="modal shop-info-modal" style="max-width: 960px; width: 95%;">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-th-large"></i> ${title} - Shops</h3>
+                        <button class="modal-close"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="margin-bottom:12px; color: var(--text-muted);">${list.length} shop(s) in this category</div>
+                        <div id="${uid}-grid" class="shop-cards-grid"></div>
+                        <div id="${uid}-load" style="text-align:center; margin-top:16px;"></div>
+                    </div>
+                </div>`;
+            overlay.querySelector('.modal-close').addEventListener('click', () => { overlay.remove(); document.body.style.overflow = 'auto'; });
+            document.body.appendChild(overlay);
+            document.body.style.overflow = 'hidden';
+
+            let shown = 0;
+            const pageSize = 12;
+            const grid = overlay.querySelector(`#${uid}-grid`);
+            const load = overlay.querySelector(`#${uid}-load`);
+            const renderMore = () => {
+                const slice = list.slice(shown, shown + pageSize);
+                grid.insertAdjacentHTML('beforeend', slice.map(shop => `
+                    <div class="shop-card">
+                        <div class="shop-header">
+                            <div class="shop-info">
+                                <h3>${shop.shop_name || shop.name}</h3>
+                                <p>Shop ID: ${shop.id}</p>
+                            </div>
+                            <span class="shop-status ${shop.status === 'active' ? 'active' : (shop.status === 'inactive' ? 'inactive' : 'pending')}">${shop.status || 'active'}</span>
+                        </div>
+                        <div class="shop-actions">
+                            <button class="action-btn info" title="Shop Information" onclick="dashboard.openShopInfoModal('${shop.id}')"><i class="fas fa-info-circle"></i></button>
+                            <button class="action-btn team" title="Manage Team" onclick="dashboard.openShopTeamModal('${shop.id}')"><i class="fas fa-user"></i></button>
+                        </div>
+                    </div>
+                `).join(''));
+                shown += slice.length;
+                load.innerHTML = shown < list.length ? `<button class="btn primary" id="${uid}-btn"><i class="fas fa-plus"></i> Load More</button>` : '';
+                const btn = load.querySelector(`#${uid}-btn`);
+                if (btn) btn.onclick = renderMore;
+            };
+            renderMore();
+        } catch (e) {
+            console.warn('openCategoryShopsModal failed', e);
+            if (this.showToast) this.showToast('Failed to open category shops', 'error');
+        }
+    }
+
 
     renderCategoriesEmpty() {
         const container = document.getElementById('categories-grid');
@@ -2717,6 +2812,7 @@ class Dashboard {
                 <i class="fas fa-th-large"></i>
                 <h3>No Categories Yet</h3>
                 <p>Create your first category to start organizing your menu items.</p>
+
                 <button class="btn primary" onclick="dashboard.openCategoryModal()">
                     <i class="fas fa-plus"></i>
                     Add First Category
@@ -2734,6 +2830,8 @@ class Dashboard {
         const defaultColors = [
             '#ff6b35', '#e74c3c', '#f39c12', '#e67e22',
             '#27ae60', '#2ecc71', '#3498db', '#2980b9',
+
+
             '#9b59b6', '#8e44ad', '#e91e63', '#8b4513'
         ];
 
@@ -4186,6 +4284,7 @@ function openShopEarningsOverride(shopId) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         const uid = 'earn-' + Math.random().toString(36).slice(2);
+
         overlay.innerHTML = `
             <div class="modal" style="max-width:520px;">
                 <div class="modal-header">
@@ -4261,6 +4360,18 @@ if (typeof window !== 'undefined') {
     window.renderDriverAnnouncements = renderDriverAnnouncements;
     window.deleteDriverAnnouncement = deleteDriverAnnouncement;
     window.openDriverAnnouncementViewsModal = openDriverAnnouncementViewsModal;
+
+// Global helper: open modal showing shops in a category
+window.viewCategoryShops = function(categoryId) {
+    try {
+        const dash = window.dashboard;
+        if (!dash) return;
+        dash.openCategoryShopsModal(Number(categoryId));
+    } catch (e) {
+        console.warn('viewCategoryShops failed', e);
+    }
+};
+
     window.openShopEarningsOverride = openShopEarningsOverride;
 
     console.log('✅ Dashboard class and helpers exposed globally');
