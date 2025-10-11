@@ -2478,12 +2478,17 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                     .eq('shop_id', parseInt(shopId));
 
                 if (teamError) {
-                    console.error('Error loading team members:', teamError);
+                    console.error(`❌ Error loading team members for shop ${shopId}:`, teamError);
                     return;
                 }
 
                 const members = Array.isArray(teamMembers) ? teamMembers : [];
-                if (members.length === 0) return;
+                console.log(`📋 Shop ${shopId} has ${members.length} team members for order #${orderData.id}`);
+
+                if (members.length === 0) {
+                    console.warn(`⚠️ No team members found for shop ${shopId} - order #${orderData.id} will not be sent to any drivers!`);
+                    return;
+                }
 
                 const prepTimeText = preparation_time === 0 ? 'Ready Now' : `Ready in ${preparation_time} minutes`;
                 const amountOrPaid = isPaid ? '💳 Payment: Card (Paid)' : `💰 Amount: €${parseFloat(order_amount).toFixed(2)}`;
@@ -2515,18 +2520,20 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
                 let notificationData = [];
                 if (notifications.length > 0) {
+                    console.log(`📤 Creating ${notifications.length} notifications for order #${orderData.id}`);
                     const { data: insData, error: notificationError } = await supabase
                         .from('driver_notifications')
                         .insert(notifications)
                         .select('id, created_at, message, status, is_read, driver_id');
 
                     if (notificationError) {
-                        console.error('Error creating notifications:', notificationError);
+                        console.error(`❌ Error creating notifications for order #${orderData.id}:`, notificationError);
                         return;
                     }
                     notificationData = insData || [];
+                    console.log(`✅ Successfully created ${notificationData.length} notifications for order #${orderData.id}`);
                 } else {
-                    console.log('No new notifications to create (duplicates skipped)');
+                    console.log(`ℹ️ No new notifications to create for order #${orderData.id} (all drivers already notified or duplicates skipped)`);
                     notificationData = [];
                 }
 
@@ -2535,6 +2542,7 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
                 // Broadcast immediately and send all push notifications in parallel to reduce latency
                 const pushPromises = [];
+                let broadcastCount = 0;
                 for (const notification of notificationData) {
                     try {
                         const realtimeNotification = {
@@ -2549,6 +2557,7 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                             shop_name: shopData.shop_name
                         };
                         broadcastToUser(notification.driver_id, 'driver', realtimeNotification);
+                        broadcastCount++;
                         pushPromises.push(
                             sendPushNotification(notification.driver_id, 'driver', {
                                 id: notification.id,
@@ -2559,11 +2568,16 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                             })
                         );
                     } catch (pushErr) {
-                        console.error('Push/broadcast setup failed for notification', notification.id, pushErr);
+                        console.error(`❌ Push/broadcast setup failed for notification ${notification.id}:`, pushErr);
                     }
                 }
+                console.log(`📡 Broadcasted order #${orderData.id} to ${broadcastCount} drivers via WebSocket`);
+
                 // Fire-and-wait in background without blocking order flow; tolerate individual failures
-                await Promise.allSettled(pushPromises);
+                const pushResults = await Promise.allSettled(pushPromises);
+                const successfulPushes = pushResults.filter(r => r.status === 'fulfilled').length;
+                const failedPushes = pushResults.filter(r => r.status === 'rejected').length;
+                console.log(`📲 Push notifications for order #${orderData.id}: ${successfulPushes} sent, ${failedPushes} failed`);
             } catch (bgErr) {
                 console.error('Background notification processing failed:', bgErr);
             }
@@ -2590,11 +2604,13 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
 
 // GET /api/shop/:shopId/pending-orders-stale - pending orders older than N minutes (default 2)
-app.get('/api/shop/:shopId/pending-orders-stale', async (req, res) => {
+app.get('/api/shop/:shopId/pending-orders-stale', authenticateUser, async (req, res) => {
     try {
         const { shopId } = req.params;
         const minMinutes = Math.max(1, parseInt(req.query.minMinutes || '2'));
         const cutoff = new Date(Date.now() - minMinutes * 60 * 1000).toISOString();
+
+        console.log(`Fetching stale pending orders for shop ${shopId}, older than ${minMinutes} minutes`);
 
         const { data, error } = await supabase
             .from('shop_orders')
@@ -2603,8 +2619,12 @@ app.get('/api/shop/:shopId/pending-orders-stale', async (req, res) => {
             .eq('status', 'pending')
             .lt('created_at', cutoff)
             .order('created_at', { ascending: false });
-        if (error) throw error;
+        if (error) {
+            console.error('Supabase error fetching stale orders:', error);
+            throw error;
+        }
 
+        console.log(`Found ${(data || []).length} stale pending orders for shop ${shopId}`);
         res.json({ success: true, orders: data || [] });
     } catch (e) {
         console.error('Error fetching stale pending orders:', e);
@@ -3762,6 +3782,17 @@ app.put('/api/orders/:orderId/complete', async (req, res) => {
             console.warn('Broadcast to shop on complete failed (non-fatal):', e);
         }
 
+        // Clean up any remaining notifications for this order (should already be deleted, but ensure cleanup)
+        try {
+            await supabase
+                .from('driver_notifications')
+                .delete()
+                .eq('order_id', parseInt(orderId));
+            console.log(`Cleaned up notifications for completed order ${orderId}`);
+        } catch (cleanupErr) {
+            console.warn('Failed to cleanup notifications for completed order:', cleanupErr);
+        }
+
         res.json({
             success: true,
             order: data,
@@ -3891,6 +3922,7 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
         console.log(`Loading notifications for driver ${driverId}`);
 
         // Get ONLY PENDING notifications from database with shop information
+        // Also join with shop_orders to filter out notifications for orders that are no longer pending
         const { data, error } = await supabase
             .from('driver_notifications')
             .select(`
@@ -3901,7 +3933,8 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
                 created_at,
                 confirmed_at,
                 order_id,
-                shop_accounts!inner(id, shop_name, email)
+                shop_accounts!inner(id, shop_name, email),
+                shop_orders!left(id, status)
             `)
             .eq('driver_id', driverId)
             .eq('status', 'pending')  // Only show pending notifications
@@ -3913,8 +3946,26 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             throw error;
         }
 
+        // Filter out notifications where the order is no longer pending or doesn't exist
+        const validNotifications = (data || []).filter(notification => {
+            // If order_id exists, check if the order is still pending
+            if (notification.order_id) {
+                // If shop_orders is null, the order was deleted - exclude this notification
+                if (!notification.shop_orders) {
+                    console.log(`Filtering out notification ${notification.id} - order ${notification.order_id} no longer exists`);
+                    return false;
+                }
+                // If order status is not pending, exclude this notification
+                if (notification.shop_orders.status !== 'pending') {
+                    console.log(`Filtering out notification ${notification.id} - order ${notification.order_id} status is ${notification.shop_orders.status}`);
+                    return false;
+                }
+            }
+            return true;
+        });
+
         // Format notifications
-        const notifications = (data || []).map(notification => ({
+        const notifications = validNotifications.map(notification => ({
             id: notification.id,
             message: notification.message,
             status: notification.status,
@@ -3930,6 +3981,22 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             }
         }));
 
+        // Clean up stale notifications in the background (notifications for non-pending orders)
+        if (validNotifications.length < (data || []).length) {
+            const staleIds = (data || [])
+                .filter(n => !validNotifications.find(v => v.id === n.id))
+                .map(n => n.id);
+            if (staleIds.length > 0) {
+                console.log(`Cleaning up ${staleIds.length} stale notifications for driver ${driverId}`);
+                supabase
+                    .from('driver_notifications')
+                    .delete()
+                    .in('id', staleIds)
+                    .then(() => console.log(`Deleted ${staleIds.length} stale notifications`))
+                    .catch(err => console.error('Failed to delete stale notifications:', err));
+            }
+        }
+
         // Get unread count
         const { count, error: countError } = await supabase
             .from('driver_notifications')
@@ -3942,7 +4009,7 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             throw countError;
         }
 
-        console.log(`Loaded ${notifications.length} notifications for driver ${driverId}`);
+        console.log(`Loaded ${notifications.length} valid notifications for driver ${driverId} (filtered from ${(data || []).length})`);
 
         res.json({
             success: true,
