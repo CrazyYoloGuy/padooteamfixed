@@ -9,25 +9,28 @@ class PWAManager {
 
     async init() {
         console.log('🚀 PWA Manager initializing...');
-        
+
         // Check if already installed
         this.checkInstallStatus();
-        
+
         // Register service worker
         await this.registerServiceWorker();
-        
+
         // Setup install prompt
         this.setupInstallPrompt();
-        
+
         // Setup update checker
         this.setupUpdateChecker();
-        
+
+        // Check for server version updates immediately
+        await this.checkServerVersion();
+
         // Add install button if not installed
         this.addInstallButton();
-        
+
         // Setup offline indicator
         this.setupOfflineIndicator();
-        
+
         console.log('✅ PWA Manager initialized');
     }
 
@@ -442,6 +445,56 @@ class PWAManager {
                 }
             }
         }, 10 * 60 * 1000); // 10 minutes
+    }
+
+    async checkServerVersion() {
+        try {
+            // Store current version in localStorage
+            const storedVersion = localStorage.getItem('app_version');
+
+            // Fetch current server version
+            const response = await fetch('/api/version', {
+                method: 'GET',
+                cache: 'no-store', // Force fresh fetch
+                headers: {
+                    'Pragma': 'no-cache',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                }
+            });
+
+            if (!response.ok) {
+                console.warn('⚠️ Could not fetch server version');
+                return;
+            }
+
+            const data = await response.json();
+            const serverVersion = data.version;
+
+            console.log('📦 Server version:', serverVersion);
+            console.log('📦 Stored version:', storedVersion);
+
+            // If version changed, force reload
+            if (storedVersion && storedVersion !== serverVersion) {
+                console.log('🔄 Version mismatch detected! Forcing reload...');
+                localStorage.setItem('app_version', serverVersion);
+
+                // Clear all caches
+                if ('caches' in window) {
+                    const cacheNames = await caches.keys();
+                    await Promise.all(cacheNames.map(name => caches.delete(name)));
+                    console.log('🗑️ Cleared all caches');
+                }
+
+                // Force hard reload
+                window.location.reload(true);
+            } else {
+                // Store version for next check
+                localStorage.setItem('app_version', serverVersion);
+                console.log('✅ App is up to date');
+            }
+        } catch (error) {
+            console.error('❌ Error checking server version:', error);
+        }
     }
 
     // Helper methods for device detection
