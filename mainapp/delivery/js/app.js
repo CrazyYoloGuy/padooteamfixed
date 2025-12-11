@@ -26,8 +26,6 @@ class DeliveryApp {
         // Auto-refresh intervals
         this.notificationRefreshInterval = null;
         this.timeUpdateInterval = null;
-        // Global 'time ago' ticker
-        this._timeAgoTicker = null;
 
         // Initialize translation system early so UI renders in saved language
         this.initTranslations();
@@ -500,13 +498,10 @@ class DeliveryApp {
         const pageParam = params.get('page');
         const orderParam = params.get('order');
         let initialPage = 'home';
-        console.log('🔍 URL params at init - page:', pageParam, 'order:', orderParam);
         if (pageParam === 'orders' || orderParam) {
             initialPage = 'orders';
             this.currentOrdersView = 'active';
-            console.log('⚠️ URL has page=orders or order param, setting initialPage to orders');
         }
-        console.log('📄 Initial page:', initialPage);
         this.navigateToPage(initialPage);
         this.updateUI();
         if (initialPage === 'orders' && orderParam) {
@@ -518,8 +513,6 @@ class DeliveryApp {
         // Setup notifications menu
         this.setupNotificationsMenu();
 
-        // Start periodic time-ago updates across the app
-        this.startTimeAgoAutoUpdate();
 
         // Start background supervisor that ensures older pending orders are visible
         this.startGlobalLiveOrdersSupervisor();
@@ -769,8 +762,7 @@ class DeliveryApp {
     }
 
     navigateToPage(page) {
-        console.log(`🔀 Navigating to ${page} (from ${this.currentPage})`);
-        console.log('📍 Stack trace:', new Error().stack.split('\n').slice(1, 4).join('\n'));
+        console.log(`Navigating to ${page}`);
 
         // Clear notification time updates when leaving notifications page
         if (this.currentPage === 'notifications' && page !== 'notifications' && this.timeUpdateInterval) {
@@ -1042,7 +1034,7 @@ class DeliveryApp {
                 <div class="activity-content">
                     <div class="activity-title">${labelFor(o)}</div>
                     <div class="activity-sub">Order #${o.id} • ${(this.getShopName ? this.getShopName(o) : (o.shop_name || 'Shop'))}</div>
-                    <div class="activity-time"><span class="time-ago" data-original-time="${o.delivery_time || o.updated_at || o.created_at}">${this.formatTimeAgo(o.delivery_time || o.updated_at || o.created_at)}</span></div>
+                    <div class="activity-time">${this.formatTimeAgo(o.delivery_time || o.updated_at || o.created_at)}</div>
                 </div>
             </div>
         `).join('');
@@ -2019,11 +2011,10 @@ class DeliveryApp {
     // createToastContainer removed - using modern notifications only
 
     async renderOrders() {
-        console.log('🔍 renderOrders() called - currentOrdersView:', this.currentOrdersView);
+        console.log('Rendering orders page with navigation...');
 
         // Initialize current view if not set
         if (!this.currentOrdersView) {
-            console.log('⚠️ currentOrdersView was not set, defaulting to active');
             this.currentOrdersView = 'active';
         }
 
@@ -2783,7 +2774,7 @@ class DeliveryApp {
                                     line-height: 1.2;
                                 ">Order #${order.id}</h3>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <span class="time-ago" data-original-time="${order.created_at}" style="
+                                    <span style="
                                         color: #6b7280;
                                         font-size: 12px;
                                     ">${timeAgo}</span>
@@ -2814,9 +2805,9 @@ class DeliveryApp {
                 <!-- Order Details -->
                 <div style="padding: 14px 16px;">
                     <!-- 2x2 Grid Layout -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px; align-items: flex-start;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px;">
                         <!-- Phone -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -2828,14 +2819,14 @@ class DeliveryApp {
                             ">
                                 <i class="fas fa-phone" style="color: #3b82f6; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${order.customer_phone}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${order.customer_phone}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Phone</div>
                             </div>
                         </div>
 
                         <!-- Shop -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -2847,14 +2838,14 @@ class DeliveryApp {
                             ">
                                 <i class="fas fa-store" style="color: #ff6b35; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${shopName}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${shopName}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Shop</div>
                             </div>
                         </div>
 
-                        <!-- Address (spans full width on mobile) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px; grid-column: 1 / -1;">
+                        <!-- Address -->
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -2863,18 +2854,17 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-map-marker-alt" style="color: #f59e0b; font-size: 13px;"></i>
                             </div>
                             <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${order.delivery_address}</div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${order.delivery_address}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Address</div>
                             </div>
                         </div>
 
                         <!-- Preparation Time -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -2883,11 +2873,10 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-${prepTimeIcon}" style="color: ${prepTimeColor}; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
+                            <div>
                                 <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${prepTimeText}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Ready</div>
                             </div>
@@ -6491,26 +6480,13 @@ class DeliveryApp {
                 this.smartMemory.recentOrders.lastUpdate = 0;
             }
 
-            // After accepting, ensure Orders page shows Active tab (SET THIS FIRST!)
-            console.log('✅ Setting currentOrdersView to active after accepting order');
-            this.currentOrdersView = 'active';
-
-            // IMPORTANT: Stay on current page, don't navigate away!
-            // Just refresh the current page to show updated order status
+            // Re-render notifications if on notifications page
             if (this.currentPage === 'notifications') {
-                console.log('📍 On notifications page, staying here and refreshing notifications');
                 this.renderNotifications(this.notifications);
-            } else if (this.currentPage === 'orders') {
-                // Already on orders page, just refresh the orders list
-                console.log('📍 Already on orders page, refreshing orders list');
-                this.renderOrders();
-            } else if (this.currentPage === 'home') {
-                console.log('📍 On home page, staying here and updating activity');
-                this.updateRecentActivity();
-            } else {
-                // On any other page, just stay there
-                console.log('📍 On other page (' + this.currentPage + '), staying here');
             }
+
+            // Navigate to orders page to show accepted order
+            this.navigateToPage('orders');
 
         } catch (error) {
             console.error('Error accepting order:', error);
@@ -6612,7 +6588,7 @@ class DeliveryApp {
                         <!-- Order Time -->
                         <div>
                             <div style="color: #6b7280; font-size: 12px; font-weight: 600; margin-bottom: 4px;">ORDERED</div>
-                            <div style="color: #111827; font-size: 14px; font-weight: 600;"><span class="time-ago" data-original-time="${notification.created_at}">${this.formatTimeAgo(notification.created_at)}</span></div>
+                            <div style="color: #111827; font-size: 14px; font-weight: 600;">${this.formatTimeAgo(notification.created_at)}</div>
                         </div>
                     </div>
 
@@ -6779,7 +6755,7 @@ class DeliveryApp {
 
                     <div style="margin-bottom: 24px;">
                         <h4 style="margin: 0 0 8px 0; color: #374151; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Order Time</h4>
-                        <p style="margin: 0; font-size: 16px; color: #111827; font-weight: 500;"><span class="time-ago" data-original-time="${notification.created_at}">${this.formatTimeAgo(notification.created_at)}</span></p>
+                        <p style="margin: 0; font-size: 16px; color: #111827; font-weight: 500;">${this.formatTimeAgo(notification.created_at)}</p>
                     </div>
 
                     <!-- Actions -->
@@ -6930,7 +6906,7 @@ class DeliveryApp {
                                     line-height: 1.2;
                                 ">Order #${orderId}</h3>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <span class="time-ago" data-original-time="${notification.created_at}" style="
+                                    <span style="
                                         color: #6b7280;
                                         font-size: 12px;
                                     ">${this.formatTimeAgo(notification.created_at)}</span>
@@ -6960,9 +6936,9 @@ class DeliveryApp {
                 <!-- Compact Order Details -->
                 <div style="padding: 14px 16px;">
                     <!-- 2x2 Grid Layout -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px; align-items: flex-start;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px;">
                         <!-- Phone (Top Left) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -6974,14 +6950,14 @@ class DeliveryApp {
                             ">
                                 <i class="fas fa-phone" style="color: #3b82f6; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${phone}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${phone}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Phone</div>
                             </div>
                         </div>
 
                         <!-- Shop (Top Right) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -6993,14 +6969,14 @@ class DeliveryApp {
                             ">
                                 <i class="fas fa-store" style="color: #ff6b35; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${shopName}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${shopName}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Shop</div>
                             </div>
                         </div>
 
-                        <!-- Address (spans full width on mobile) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px; grid-column: 1 / -1;">
+                        <!-- Address (Bottom Left) -->
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -7009,18 +6985,17 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-map-marker-alt" style="color: #f59e0b; font-size: 13px;"></i>
                             </div>
                             <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${address}</div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${address}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Address</div>
                             </div>
                         </div>
 
                         <!-- Preparation Time (Bottom Right) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -7029,11 +7004,10 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-${prepTimeIcon}" style="color: ${prepTimeColor}; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
+                            <div>
                                 <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${prepTimeText}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Ready</div>
                             </div>
@@ -9024,7 +8998,7 @@ class DeliveryApp {
                                     line-height: 1.2;
                                 ">Order #${order.id}</h3>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <span class="time-ago" data-original-time="${order.created_at}" style="
+                                    <span style="
                                         color: #6b7280;
                                         font-size: 12px;
                                     ">${timeAgo}</span>
@@ -9068,9 +9042,9 @@ class DeliveryApp {
                 <!-- Order Details -->
                 <div style="padding: 14px 16px;">
                     <!-- 2x2 Grid Layout -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px; align-items: flex-start;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-bottom: 14px;">
                         <!-- Phone -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -9079,18 +9053,17 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-phone" style="color: #3b82f6; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${order.customer_phone || 'Not provided'}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${order.customer_phone || 'Not provided'}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Phone</div>
                             </div>
                         </div>
 
                         <!-- Shop -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -9099,18 +9072,17 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-store" style="color: #ff6b35; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${shopName}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${shopName}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Shop</div>
                             </div>
                         </div>
 
-                        <!-- Address (spans full width on mobile) -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px; grid-column: 1 / -1;">
+                        <!-- Address -->
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -9119,18 +9091,17 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-map-marker-alt" style="color: #f59e0b; font-size: 13px;"></i>
                             </div>
                             <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${order.delivery_address || 'Not provided'}</div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${order.delivery_address || 'Not provided'}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Address</div>
                             </div>
                         </div>
 
                         <!-- Driver -->
-                        <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                             <div style="
                                 width: 32px;
                                 height: 32px;
@@ -9139,12 +9110,11 @@ class DeliveryApp {
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                flex-shrink: 0;
                             ">
                                 <i class="fas fa-user" style="color: #6366f1; font-size: 13px;"></i>
                             </div>
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; word-break: break-word;">${order.driver_name || order.driver_email || (order.driver_id ? `Driver #${order.driver_id}` : 'Unknown')}</div>
+                            <div>
+                                <div style="font-weight: 600; color: #111827; font-size: 13px; line-height: 1.2;">${order.driver_name || order.driver_email || (order.driver_id ? `Driver #${order.driver_id}` : 'Unknown')}</div>
                                 <div style="color: #6b7280; font-size: 11px;">Driver</div>
                             </div>
                         </div>
@@ -10494,18 +10464,11 @@ class DeliveryApp {
         const notificationId = data.notificationId || data;
         const { orderId, shopName } = data;
 
-        // Set Orders view to Active, but DON'T navigate away from current page
-        // The Service Worker already opened the app with page=orders if needed
+        // Always open Orders page (Active). Do NOT accept from notification click
         this.currentOrdersView = 'active';
-
-        // Only navigate if we're not already on the orders page
-        if (this.currentPage !== 'orders') {
-            console.log('📍 Not on orders page, navigating to orders');
-            this.navigateToPage('orders');
-        } else {
-            console.log('📍 Already on orders page, just refreshing');
-            this.renderOrders();
-        }
+        this.navigateToPage('orders');
+        // Ensure the list renders immediately
+        this.renderOrders();
 
         // Highlight the pushed order if present
         if (orderId) {
@@ -10527,9 +10490,9 @@ class DeliveryApp {
 
         const { orderId, notificationId } = data;
 
-        // After accepting, ensure Orders page shows Active tab
-        console.log('✅ Setting currentOrdersView to active after accepting order (handleOrderAcceptedFromSW)');
-        this.currentOrdersView = 'active';
+        // Refresh orders to show updated status
+        this.renderOrders();
+        this.updateRecentActivity();
 
         // Mark related notification as read
         if (notificationId) {
@@ -10541,21 +10504,8 @@ class DeliveryApp {
         // Show success message
         this.showToast('✅ Order accepted successfully!', 'success');
 
-        // IMPORTANT: Stay on current page, don't navigate away!
-        if (this.currentPage === 'notifications') {
-            console.log('📍 On notifications page, staying here and refreshing notifications');
-            this.renderNotifications(this.notifications);
-        } else if (this.currentPage === 'orders') {
-            // Already on orders page, just refresh the orders list
-            console.log('📍 Already on orders page, refreshing orders list');
-            this.renderOrders();
-        } else if (this.currentPage === 'home') {
-            console.log('📍 On home page, staying here and updating activity');
-            this.updateRecentActivity();
-        } else {
-            // On any other page, just stay there
-            console.log('📍 On other page (' + this.currentPage + '), staying here');
-        }
+        // Navigate to orders page to show accepted order
+        this.navigateToPage('orders');
     }
 
     // Show order acceptance modal
@@ -10615,28 +10565,9 @@ class DeliveryApp {
 
             if (response.ok) {
                 const result = await response.json();
-
-                // After accepting, ensure Orders page shows Active tab (SET THIS FIRST!)
-                console.log('✅ Setting currentOrdersView to active after accepting order (acceptOrderById)');
-                this.currentOrdersView = 'active';
-
                 this.showToast('✅ Order accepted successfully!', 'success');
-
-                // IMPORTANT: Stay on current page, don't navigate away!
-                if (this.currentPage === 'notifications') {
-                    console.log('📍 On notifications page, staying here and refreshing notifications');
-                    this.renderNotifications(this.notifications);
-                } else if (this.currentPage === 'orders') {
-                    // Already on orders page, just refresh the orders list
-                    console.log('📍 Already on orders page, refreshing orders list');
-                    this.renderOrders();
-                } else if (this.currentPage === 'home') {
-                    console.log('📍 On home page, staying here and updating activity');
-                    this.updateRecentActivity();
-                } else {
-                    // On any other page, just stay there
-                    console.log('📍 On other page (' + this.currentPage + '), staying here');
-                }
+                this.renderOrders(); // Refresh orders list
+                this.navigateToPage('orders');
             } else {
                 throw new Error('Failed to accept order');
             }
@@ -12586,24 +12517,6 @@ class DeliveryApp {
                 element.textContent = this.formatTimeAgo(originalTime);
             }
         });
-    }
-
-    // Start global auto-update for all time-ago labels (runs every minute)
-    startTimeAgoAutoUpdate() {
-        try {
-            if (this._timeAgoTicker) {
-                clearInterval(this._timeAgoTicker);
-            }
-        } catch (_) {}
-
-        const tick = () => {
-            // Always update, even in webviews where document.hidden may be unreliable
-            this.updateTimeDisplays();
-        };
-
-        // Run once immediately so freshly rendered pages are accurate
-        tick();
-        this._timeAgoTicker = setInterval(tick, 60000);
     }
 
     // Refresh current page to apply translations
