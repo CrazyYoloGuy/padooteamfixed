@@ -8,9 +8,16 @@ const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const http = require('http');
 const webpush = require('web-push');
+const fs = require('fs');
 
 // Load environment variables
 require('dotenv').config();
+
+// ==================== VERSION MANAGEMENT ====================
+// Generate a unique build timestamp to force cache invalidation on every deployment
+const BUILD_TIMESTAMP = Date.now();
+const BUILD_VERSION = `v${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+console.log(`🚀 Server starting with BUILD_VERSION: ${BUILD_VERSION} (${BUILD_TIMESTAMP})`);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -421,19 +428,46 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Serve static files with proper MIME types
+// Serve static files with aggressive cache-busting headers
 app.use(express.static('.', {
-    setHeaders: (res, path) => {
-        if (path.endsWith('.css')) {
-            res.setHeader('Content-Type', 'text/css');
-        } else if (path.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript');
-        } else if (path.endsWith('.json')) {
-            res.setHeader('Content-Type', 'application/json');
-        } else if (path.endsWith('.svg')) {
+    setHeaders: (res, filePath) => {
+        // CRITICAL: Add version header to all responses for cache busting
+        res.setHeader('X-Build-Version', BUILD_VERSION);
+        res.setHeader('X-Build-Timestamp', BUILD_TIMESTAMP);
+
+        if (filePath.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css; charset=utf-8');
+            // AGGRESSIVE: Never cache CSS - always fetch fresh
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
+        } else if (filePath.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+            // AGGRESSIVE: Never cache JS - always fetch fresh
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
+        } else if (filePath.endsWith('.json')) {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            // Never cache JSON files
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
+        } else if (filePath.endsWith('.svg')) {
             res.setHeader('Content-Type', 'image/svg+xml');
-        } else if (path.endsWith('manifest.json')) {
-            res.setHeader('Content-Type', 'application/manifest+json');
+            res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache SVGs for 1 day
+        } else if (filePath.endsWith('.png') || filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+            res.setHeader('Cache-Control', 'public, max-age=604800'); // Cache images for 1 week
+        } else if (filePath.endsWith('manifest.json')) {
+            res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+            // CRITICAL: Never cache manifest
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+            res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
         }
     }
 }));
@@ -543,14 +577,28 @@ app.use('/icons', express.static('icons', {
     }
 }));
 
-// Serve PWA files explicitly
+// Serve PWA files explicitly with AGGRESSIVE no-cache headers
 app.get('/manifest.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/manifest+json');
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    // CRITICAL: Never cache manifest - always fetch fresh
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Build-Version', BUILD_VERSION);
+    res.setHeader('X-Build-Timestamp', BUILD_TIMESTAMP);
+    res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
     res.sendFile(path.join(__dirname, 'manifest.json'));
 });
 
 app.get('/sw.js', (req, res) => {
-    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    // CRITICAL: Never cache service worker - always fetch fresh
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Build-Version', BUILD_VERSION);
+    res.setHeader('X-Build-Timestamp', BUILD_TIMESTAMP);
+    res.setHeader('ETag', `"${BUILD_TIMESTAMP}"`);
     res.sendFile(path.join(__dirname, 'sw.js'));
 });
 
@@ -606,6 +654,19 @@ app.get('/api/health', (req, res) => {
         message: 'API is working',
         timestamp: new Date().toISOString(),
         database: 'Connected to Supabase'
+    });
+});
+
+// API version check - used by clients to detect if they need to refresh
+app.get('/api/version', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({
+        success: true,
+        version: BUILD_VERSION,
+        timestamp: BUILD_TIMESTAMP,
+        buildTime: new Date(BUILD_TIMESTAMP).toISOString()
     });
 });
 
@@ -2478,17 +2539,12 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                     .eq('shop_id', parseInt(shopId));
 
                 if (teamError) {
-                    console.error(`❌ Error loading team members for shop ${shopId}:`, teamError);
+                    console.error('Error loading team members:', teamError);
                     return;
                 }
 
                 const members = Array.isArray(teamMembers) ? teamMembers : [];
-                console.log(`📋 Shop ${shopId} has ${members.length} team members for order #${orderData.id}`);
-
-                if (members.length === 0) {
-                    console.warn(`⚠️ No team members found for shop ${shopId} - order #${orderData.id} will not be sent to any drivers!`);
-                    return;
-                }
+                if (members.length === 0) return;
 
                 const prepTimeText = preparation_time === 0 ? 'Ready Now' : `Ready in ${preparation_time} minutes`;
                 const amountOrPaid = isPaid ? '💳 Payment: Card (Paid)' : `💰 Amount: €${parseFloat(order_amount).toFixed(2)}`;
@@ -2520,20 +2576,18 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
                 let notificationData = [];
                 if (notifications.length > 0) {
-                    console.log(`📤 Creating ${notifications.length} notifications for order #${orderData.id}`);
                     const { data: insData, error: notificationError } = await supabase
                         .from('driver_notifications')
                         .insert(notifications)
                         .select('id, created_at, message, status, is_read, driver_id');
 
                     if (notificationError) {
-                        console.error(`❌ Error creating notifications for order #${orderData.id}:`, notificationError);
+                        console.error('Error creating notifications:', notificationError);
                         return;
                     }
                     notificationData = insData || [];
-                    console.log(`✅ Successfully created ${notificationData.length} notifications for order #${orderData.id}`);
                 } else {
-                    console.log(`ℹ️ No new notifications to create for order #${orderData.id} (all drivers already notified or duplicates skipped)`);
+                    console.log('No new notifications to create (duplicates skipped)');
                     notificationData = [];
                 }
 
@@ -2542,7 +2596,6 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
                 // Broadcast immediately and send all push notifications in parallel to reduce latency
                 const pushPromises = [];
-                let broadcastCount = 0;
                 for (const notification of notificationData) {
                     try {
                         const realtimeNotification = {
@@ -2557,7 +2610,6 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                             shop_name: shopData.shop_name
                         };
                         broadcastToUser(notification.driver_id, 'driver', realtimeNotification);
-                        broadcastCount++;
                         pushPromises.push(
                             sendPushNotification(notification.driver_id, 'driver', {
                                 id: notification.id,
@@ -2568,16 +2620,11 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
                             })
                         );
                     } catch (pushErr) {
-                        console.error(`❌ Push/broadcast setup failed for notification ${notification.id}:`, pushErr);
+                        console.error('Push/broadcast setup failed for notification', notification.id, pushErr);
                     }
                 }
-                console.log(`📡 Broadcasted order #${orderData.id} to ${broadcastCount} drivers via WebSocket`);
-
                 // Fire-and-wait in background without blocking order flow; tolerate individual failures
-                const pushResults = await Promise.allSettled(pushPromises);
-                const successfulPushes = pushResults.filter(r => r.status === 'fulfilled').length;
-                const failedPushes = pushResults.filter(r => r.status === 'rejected').length;
-                console.log(`📲 Push notifications for order #${orderData.id}: ${successfulPushes} sent, ${failedPushes} failed`);
+                await Promise.allSettled(pushPromises);
             } catch (bgErr) {
                 console.error('Background notification processing failed:', bgErr);
             }
@@ -2604,13 +2651,11 @@ app.post('/api/shop/:shopId/orders', async (req, res) => {
 
 
 // GET /api/shop/:shopId/pending-orders-stale - pending orders older than N minutes (default 2)
-app.get('/api/shop/:shopId/pending-orders-stale', authenticateUser, async (req, res) => {
+app.get('/api/shop/:shopId/pending-orders-stale', async (req, res) => {
     try {
         const { shopId } = req.params;
         const minMinutes = Math.max(1, parseInt(req.query.minMinutes || '2'));
         const cutoff = new Date(Date.now() - minMinutes * 60 * 1000).toISOString();
-
-        console.log(`Fetching stale pending orders for shop ${shopId}, older than ${minMinutes} minutes`);
 
         const { data, error } = await supabase
             .from('shop_orders')
@@ -2619,12 +2664,8 @@ app.get('/api/shop/:shopId/pending-orders-stale', authenticateUser, async (req, 
             .eq('status', 'pending')
             .lt('created_at', cutoff)
             .order('created_at', { ascending: false });
-        if (error) {
-            console.error('Supabase error fetching stale orders:', error);
-            throw error;
-        }
+        if (error) throw error;
 
-        console.log(`Found ${(data || []).length} stale pending orders for shop ${shopId}`);
         res.json({ success: true, orders: data || [] });
     } catch (e) {
         console.error('Error fetching stale pending orders:', e);
@@ -3782,17 +3823,6 @@ app.put('/api/orders/:orderId/complete', async (req, res) => {
             console.warn('Broadcast to shop on complete failed (non-fatal):', e);
         }
 
-        // Clean up any remaining notifications for this order (should already be deleted, but ensure cleanup)
-        try {
-            await supabase
-                .from('driver_notifications')
-                .delete()
-                .eq('order_id', parseInt(orderId));
-            console.log(`Cleaned up notifications for completed order ${orderId}`);
-        } catch (cleanupErr) {
-            console.warn('Failed to cleanup notifications for completed order:', cleanupErr);
-        }
-
         res.json({
             success: true,
             order: data,
@@ -3922,7 +3952,6 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
         console.log(`Loading notifications for driver ${driverId}`);
 
         // Get ONLY PENDING notifications from database with shop information
-        // Also join with shop_orders to filter out notifications for orders that are no longer pending
         const { data, error } = await supabase
             .from('driver_notifications')
             .select(`
@@ -3933,8 +3962,7 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
                 created_at,
                 confirmed_at,
                 order_id,
-                shop_accounts!inner(id, shop_name, email),
-                shop_orders!left(id, status)
+                shop_accounts!inner(id, shop_name, email)
             `)
             .eq('driver_id', driverId)
             .eq('status', 'pending')  // Only show pending notifications
@@ -3946,26 +3974,8 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             throw error;
         }
 
-        // Filter out notifications where the order is no longer pending or doesn't exist
-        const validNotifications = (data || []).filter(notification => {
-            // If order_id exists, check if the order is still pending
-            if (notification.order_id) {
-                // If shop_orders is null, the order was deleted - exclude this notification
-                if (!notification.shop_orders) {
-                    console.log(`Filtering out notification ${notification.id} - order ${notification.order_id} no longer exists`);
-                    return false;
-                }
-                // If order status is not pending, exclude this notification
-                if (notification.shop_orders.status !== 'pending') {
-                    console.log(`Filtering out notification ${notification.id} - order ${notification.order_id} status is ${notification.shop_orders.status}`);
-                    return false;
-                }
-            }
-            return true;
-        });
-
         // Format notifications
-        const notifications = validNotifications.map(notification => ({
+        const notifications = (data || []).map(notification => ({
             id: notification.id,
             message: notification.message,
             status: notification.status,
@@ -3981,22 +3991,6 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             }
         }));
 
-        // Clean up stale notifications in the background (notifications for non-pending orders)
-        if (validNotifications.length < (data || []).length) {
-            const staleIds = (data || [])
-                .filter(n => !validNotifications.find(v => v.id === n.id))
-                .map(n => n.id);
-            if (staleIds.length > 0) {
-                console.log(`Cleaning up ${staleIds.length} stale notifications for driver ${driverId}`);
-                supabase
-                    .from('driver_notifications')
-                    .delete()
-                    .in('id', staleIds)
-                    .then(() => console.log(`Deleted ${staleIds.length} stale notifications`))
-                    .catch(err => console.error('Failed to delete stale notifications:', err));
-            }
-        }
-
         // Get unread count
         const { count, error: countError } = await supabase
             .from('driver_notifications')
@@ -4009,7 +4003,7 @@ app.get('/api/driver/:driverId/notifications', async (req, res) => {
             throw countError;
         }
 
-        console.log(`Loaded ${notifications.length} valid notifications for driver ${driverId} (filtered from ${(data || []).length})`);
+        console.log(`Loaded ${notifications.length} notifications for driver ${driverId}`);
 
         res.json({
             success: true,
@@ -4904,35 +4898,15 @@ app.get('/api/user/settings', authenticateUser, async (req, res) => {
             return res.status(401).json({ error: 'User not authenticated' });
         }
 
-        // If non-UUID user (e.g., shop user with numeric ID), fetch from shop_accounts
+        // If non-UUID user (e.g., shop user with numeric ID), return defaults and skip DB to avoid 22P02
         if (!isUuidLike(req.user.id)) {
-            try {
-                const { data: shopData, error: shopError } = await supabase
-                    .from('shop_accounts')
-                    .select('language')
-                    .eq('id', parseInt(req.user.id))
-                    .single();
-
-                const language = (shopData && shopData.language) ? shopData.language : 'en';
-
-                return res.json({
-                    user_id: req.user.id,
-                    earnings_per_order: 1.50,
-                    language: language,
-                    notificationSettings: { soundEnabled: true, browserEnabled: false },
-                    notification_settings: { soundEnabled: true, browserEnabled: false }
-                });
-            } catch (error) {
-                console.error('Error fetching shop language settings:', error);
-                // Return defaults on error
-                return res.json({
-                    user_id: req.user.id,
-                    earnings_per_order: 1.50,
-                    language: 'en',
-                    notificationSettings: { soundEnabled: true, browserEnabled: false },
-                    notification_settings: { soundEnabled: true, browserEnabled: false }
-                });
-            }
+            return res.json({
+                user_id: req.user.id,
+                earnings_per_order: 1.50,
+                language: 'en',
+                notificationSettings: { soundEnabled: true, browserEnabled: false },
+                notification_settings: { soundEnabled: true, browserEnabled: false }
+            });
         }
 
         // Set user context for RLS policies
@@ -5014,52 +4988,15 @@ app.patch('/api/user/settings', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: 'Invalid settings data' });
         }
 
-        // If non-UUID user (e.g., shop user id like "8"), update shop_accounts table
+        // If non-UUID user (e.g., shop user id like "8"), don't hit user_settings (UUID column)
         if (!isUuidLike(req.user.id)) {
-            try {
-                // Validate language if provided
-                if (updates.language && !['en', 'gr'].includes(updates.language)) {
-                    return res.status(400).json({ error: 'Invalid language value. Must be "en" or "gr"' });
-                }
-
-                // Update shop_accounts table with language preference
-                if (updates.language) {
-                    const { data: updateData, error: updateError } = await supabase
-                        .from('shop_accounts')
-                        .update({
-                            language: updates.language,
-                            updated_at: new Date().toISOString()
-                        })
-                        .eq('id', parseInt(req.user.id))
-                        .select()
-                        .single();
-
-                    if (updateError) {
-                        console.error('Error updating shop language:', updateError);
-                        // Return success anyway for client-side operation
-                    } else {
-                        console.log('✅ Shop language updated successfully for shop', req.user.id);
-                    }
-                }
-
-                const resp = {
-                    user_id: req.user.id,
-                    earnings_per_order: parseFloat(updates.earnings_per_order ?? 1.50),
-                    language: updates.language || 'en',
-                    updated_at: new Date().toISOString()
-                };
-                return res.json(resp);
-            } catch (error) {
-                console.error('Error updating shop settings:', error);
-                // Return success anyway for client-side operation
-                const resp = {
-                    user_id: req.user.id,
-                    earnings_per_order: parseFloat(updates.earnings_per_order ?? 1.50),
-                    language: updates.language || 'en',
-                    updated_at: new Date().toISOString()
-                };
-                return res.json(resp);
-            }
+            const resp = {
+                user_id: req.user.id,
+                earnings_per_order: parseFloat(updates.earnings_per_order ?? 1.50),
+                language: ['en','gr'].includes(updates.language) ? updates.language : 'en',
+                updated_at: new Date().toISOString()
+            };
+            return res.json(resp);
         }
 
         // Set user context for RLS policies

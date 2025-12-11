@@ -1,4 +1,10 @@
-const CACHE_NAME = 'padoo-delivery-v1.5.0';
+// CRITICAL: Use timestamp-based cache name to force cache invalidation on every deployment
+// This ensures that when the server restarts, ALL old caches are cleared
+const CACHE_NAME = `padoo-delivery-${Date.now()}`;
+const CACHE_VERSION = 'padoo-delivery-v1.5.1';
+
+console.log(`[SW] Cache name: ${CACHE_NAME}`);
+
 // Minimal caching - only essential files for faster loading
 const urlsToCache = [
   '/manifest.json',
@@ -29,18 +35,21 @@ self.addEventListener('install', (event) => {
 
 
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating Service Worker');
+  console.log('[SW] Activating Service Worker - Clearing ALL old caches');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
+      console.log('[SW] Found caches:', cacheNames);
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[SW] Deleting old cache:', cacheName);
+          // Delete ALL old caches - be aggressive about clearing
+          if (cacheName !== CACHE_NAME && (cacheName.startsWith('padoo-delivery') || cacheName.includes('cache'))) {
+            console.log('[SW] 🗑️ Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     }).then(() => {
+      console.log('[SW] ✅ Cache cleanup complete');
       // Ensure the new service worker takes control immediately
       return self.clients.claim();
     })
@@ -443,13 +452,14 @@ self.addEventListener('notificationclick', (event) => {
 
         // App not open, open new window with specific parameters
         let finalUrl = urlToOpen;
-        // Always direct to Orders page on notification clicks
-        finalUrl += `${finalUrl.includes('?') ? '&' : '?'}page=orders`;
-        if (notificationId) {
-          finalUrl += `&notification=${encodeURIComponent(notificationId)}`;
-        }
+        // Only add page=orders if there's an order to show
+        // This allows the app to remember the user's last page if no specific order
         if (orderId) {
+          finalUrl += `${finalUrl.includes('?') ? '&' : '?'}page=orders`;
           finalUrl += `&order=${encodeURIComponent(orderId)}`;
+        }
+        if (notificationId) {
+          finalUrl += `${finalUrl.includes('?') ? '&' : '?'}notification=${encodeURIComponent(notificationId)}`;
         }
 
         console.log('[SW] Opening new app window:', finalUrl);
